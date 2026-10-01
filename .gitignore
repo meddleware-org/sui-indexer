@@ -30,3 +30,8 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+
+# Local SQLite index (DB_PATH in development)
+*.db
+*.db-wal
+*.db-shm
