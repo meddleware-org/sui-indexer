@@ -1,0 +1,39 @@
+{
+  "name": "@meddleware/sui-indexer",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Lean read-indexer for Meddleware's Sui packages: polls access_gate and sealed_content events over gRPC into SQLite and serves cacheable GET pages.",
+  "author": "MeddleWare <dev@meddleware.co.uk>",
+  "license": "0BSD",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/meddleware-org/sui-indexer.git"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "esbuild src/main.ts --bundle --platform=node --target=node24 --format=esm --outfile=dist/main.mjs --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\"",
+    "start": "node --disable-warning=ExperimentalWarning dist/main.mjs",
+    "type-check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint:js": "eslint .",
+    "lint": "npm run lint:js"
+  },
+  "dependencies": {
+    "@meddleware/access-gate-client": "^0.0.1",
+    "@meddleware/seal-client": "^0.0.9",
+    "@mysten/sui": "^2.33.1"
+  },
+  "devDependencies": {
+    "@types/node": "~24.12.2",
+    "esbuild": "^0.28.2",
+    "eslint": "^10.11.0",
+    "jiti": "^2.7.0",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.70.1",
+    "vitest": "~5.0.2"
+  }
+}
