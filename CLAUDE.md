@@ -16,6 +16,9 @@ A read-indexer for display data. See [README.md](README.md) for the API and conf
   - Never insert rows out of order: no parallel backfill, and no descending reads into the table.
 - **Generation.** A new database gets a new random generation. Cursors carry it and are refused
   (`410`) across generations, so cached pages of an old database stay self-consistent.
+- **Package binding.** `Store.bindPackages` records the original id each stream indexes. At startup a
+  stream whose package changed (a fresh publish) — or that holds rows from before binding — is cleared
+  and re-read from the start, and the generation rotates. Never mix two packages' events in a stream.
 - **Cache headers are the cost model.**
   - Older pages: `public, max-age=31536000, immutable`.
   - The newest page: `public, max-age=10, s-maxage=30`, with an ETag.

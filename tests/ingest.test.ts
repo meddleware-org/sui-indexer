@@ -76,3 +76,49 @@ describe('Ingestor', () => {
     expect(decoded).toMatchObject({ kind: 'AccessConsumed', gateId: GATE_A })
   })
 })
+
+describe('Store.bindPackages', () => {
+  const OTHER = '0x' + '77'.repeat(32)
+  const bound = { 'access-gate': AG, 'sealed-content': SEAL } as const
+
+  it('records the packages of a fresh index without clearing anything', () => {
+    const store = new Store(':memory:')
+    const generation = store.generation
+    expect(store.bindPackages(bound)).toEqual([])
+    expect(store.generation).toBe(generation)
+  })
+
+  it('keeps an index whose packages are unchanged', () => {
+    const store = new Store(':memory:')
+    store.bindPackages(bound)
+    store.ingest('access-gate', [toIndexed('access-gate', minted(GATE_A, 1), opts)!], 'c1')
+    const generation = store.generation
+    expect(store.bindPackages(bound)).toEqual([])
+    expect(store.coverage('access-gate').events).toBe(1)
+    expect(store.cursor('access-gate')).toBe('c1')
+    expect(store.generation).toBe(generation)
+  })
+
+  it('clears only the stream whose package changed and rotates the generation', () => {
+    const store = new Store(':memory:')
+    store.bindPackages(bound)
+    store.ingest('access-gate', [toIndexed('access-gate', minted(GATE_A, 1), opts)!], 'c1')
+    store.ingest('sealed-content', [toIndexed('sealed-content', sealed(GATE_A, 2), opts)!], 's1')
+    const generation = store.generation
+    expect(store.bindPackages({ ...bound, 'access-gate': OTHER })).toEqual(['access-gate'])
+    expect(store.coverage('access-gate').events).toBe(0)
+    expect(store.cursor('access-gate')).toBeNull()
+    expect(store.coverage('sealed-content').events).toBe(1)
+    expect(store.cursor('sealed-content')).toBe('s1')
+    expect(store.generation).not.toBe(generation)
+    // The new binding sticks.
+    expect(store.bindPackages({ ...bound, 'access-gate': OTHER })).toEqual([])
+  })
+
+  it('clears rows indexed before packages were recorded', () => {
+    const store = new Store(':memory:')
+    store.ingest('access-gate', [toIndexed('access-gate', minted(GATE_A, 1), opts)!], 'c1')
+    expect(store.bindPackages(bound)).toEqual(['access-gate'])
+    expect(store.coverage('access-gate').events).toBe(0)
+  })
+})

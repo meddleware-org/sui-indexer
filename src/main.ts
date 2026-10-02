@@ -10,6 +10,11 @@ const log = (message: string) => console.log(`${new Date().toISOString()} ${mess
 
 const config = loadConfig()
 const store = new Store(config.dbPath)
+const cleared = store.bindPackages({
+  'access-gate': config.accessGateOriginalId,
+  'sealed-content': config.sealOriginalId,
+})
+if (cleared.length > 0) log(`package changed for ${cleared.join(', ')}: cleared and re-indexing from the start`)
 const client = new SuiGrpcClient({ network: config.network as 'testnet', baseUrl: config.grpcUrl })
 const ingestor = new Ingestor(store, client as unknown as EventSource, {
   accessGateOriginalId: config.accessGateOriginalId,

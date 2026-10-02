@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.2] - 2026-10-02
+
+### Added
+
+- **Package binding.** The index records which package each stream reads. When the configured
+  package changes (the version-gated republish of `access_gate` and `seal_policies`), that stream is
+  cleared and re-indexed from the new package's first event, and the generation rotates so older API
+  cursors are refused (`410`).
+
+### Changed
+
+- `@meddleware/access-gate-client` `^0.0.2` and `@meddleware/seal-client` `^0.0.11`: the default
+  packages are the version-gated testnet `access_gate` `0xa55789…` and `seal_policies` `0x61c4aa…`;
+  `PlatformMigrated` events are indexed (they concern no gate).
+
 ## [0.0.1] - 2026-09-30
 
 ### Added

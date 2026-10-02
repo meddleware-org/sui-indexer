@@ -34,7 +34,9 @@ All routes are `GET`, and responses are JSON with `Access-Control-Allow-Origin: 
 - **Events.** Each event is the full node's entry: `eventType`, `sender`, `bcs` (base64),
   `checkpoint`, `transactionDigest` and `eventIndex`.
 - **Cursors.** `cursor` is `<generation>.<row id>`. A rebuilt database gets a new generation, and
-  an older cursor then returns `410`.
+  an older cursor then returns `410`. Changing a stream's package (`ACCESS_GATE_ORIGINAL_ID`,
+  `SEAL_ORIGINAL_ID` or the client defaults) clears that stream at startup, re-indexes it from the new
+  package's first event and rotates the generation.
 - **Validation.** Unknown query parameters, bad ids and out-of-range limits return `400`.
 
 ## Configuration
