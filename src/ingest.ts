@@ -12,6 +12,7 @@ export interface EventSource {
       limit?: number
       after?: string | null
       order?: 'ascending' | 'descending'
+      signal?: AbortSignal
     }): Promise<{ events: CoreEventEntry[]; hasNextPage: boolean; endCursor: string | null }>
   }
 }
@@ -21,6 +22,8 @@ export interface IngestOptions {
   sealOriginalId: string
   /** Pages read per stream per poll, so one busy stream cannot starve the other (default 20). */
   maxPagesPerPoll?: number
+  /** Per-request timeout for the full node, so a hung call fails the poll instead of stalling it (default 30 s). */
+  requestTimeoutMs?: number
   log?: (message: string) => void
 }
 
@@ -88,6 +91,7 @@ export class Ingestor {
         limit: 50,
         order: 'ascending',
         after: cursor,
+        signal: AbortSignal.timeout(this.opts.requestTimeoutMs ?? 30_000),
       })
       const events: IndexedEvent[] = []
       let skipped = 0

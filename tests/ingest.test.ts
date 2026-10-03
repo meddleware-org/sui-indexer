@@ -61,6 +61,18 @@ describe('Ingestor', () => {
     expect(store.cursor('access-gate')).toBe('kept')
   })
 
+  it('bounds every full-node request, so a hung call fails the poll instead of stalling it', async () => {
+    const store = new Store(':memory:')
+    const hung = {
+      core: {
+        listEvents: (o: { signal?: AbortSignal }) =>
+          new Promise<never>((_, reject) => o.signal?.addEventListener('abort', () => reject(o.signal?.reason))),
+      },
+    }
+    const ingestor = new Ingestor(store, hung, { ...opts, requestTimeoutMs: 20 })
+    await expect(ingestor.pollStream('access-gate')).rejects.toThrow(/timed out|abort/i)
+  })
+
   it('stops at the page budget so one stream cannot starve the other', async () => {
     const store = new Store(':memory:')
     const many = Array.from({ length: 5 }, (_, i) => [minted(GATE_A, i + 1)])

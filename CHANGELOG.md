@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.4] - 2026-10-03
+
+### Fixed
+
+- Every full-node `listEvents` call has a 30 s timeout (`requestTimeoutMs`). A hung call used to stall
+  ingest indefinitely: liveness probes `/readyz`, which stays green while serving, so nothing restarted
+  the pod.
+- `ACCESS_GATE_ORIGINAL_ID` and `SEAL_ORIGINAL_ID` overrides must be `0x` + hex and are normalised, so
+  a differently cased value no longer reads as a package change (which clears and re-indexes).
+
+### Changed
+
+- `@meddleware/access-gate-client` 0.0.4 and `@meddleware/seal-client` 0.0.15.
+
 ## [0.0.3] - 2026-10-02
 
 ### Changed

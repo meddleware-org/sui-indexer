@@ -17,6 +17,14 @@ describe('loadConfig', () => {
     expect(() => loadConfig({ GRPC_URL: 'http://node.example' })).toThrow(/https/)
     expect(() => loadConfig({ NETWORK: 'devnet', GRPC_URL: 'https://n.example' })).toThrow(/no access_gate deployment/)
   })
+
+  it('validates and normalises package-id overrides', () => {
+    const c = loadConfig({ ACCESS_GATE_ORIGINAL_ID: '0xABC', SEAL_ORIGINAL_ID: `0x${'D'.repeat(64)}` })
+    expect(c.accessGateOriginalId).toBe(`0x${'0'.repeat(61)}abc`)
+    expect(c.sealOriginalId).toBe(`0x${'d'.repeat(64)}`)
+    expect(() => loadConfig({ ACCESS_GATE_ORIGINAL_ID: 'abc' })).toThrow(/ACCESS_GATE_ORIGINAL_ID/)
+    expect(() => loadConfig({ SEAL_ORIGINAL_ID: '0x12;drop' })).toThrow(/SEAL_ORIGINAL_ID/)
+  })
 })
 
 describe('RateLimiter', () => {

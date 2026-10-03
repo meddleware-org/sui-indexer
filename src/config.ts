@@ -1,3 +1,4 @@
+import { normalizeSuiAddress } from '@mysten/sui/utils'
 import { accessGateDeployment } from '@meddleware/access-gate-client/deployments'
 import { sealPoliciesDeployment } from '@meddleware/seal-client/deployments'
 
@@ -19,6 +20,14 @@ export interface Config {
 const DEFAULT_GRPC: Record<string, string> = {
   testnet: 'https://fullnode.testnet.sui.io:443',
   mainnet: 'https://fullnode.mainnet.sui.io:443',
+}
+
+/** A package original-id override: `0x` + hex, normalised so the stored binding compares exactly. */
+function packageId(env: NodeJS.ProcessEnv, name: string, fallback: () => string): string {
+  const raw = env[name]
+  if (raw === undefined || raw === '') return fallback()
+  if (!/^0x[0-9a-fA-F]{1,64}$/.test(raw)) throw new Error(`${name} must be a 0x-prefixed hex package id, got ${raw}`)
+  return normalizeSuiAddress(raw)
 }
 
 function int(env: NodeJS.ProcessEnv, name: string, fallback: number, min: number, max: number): number {
@@ -49,8 +58,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     dbPath: env.DB_PATH || '/data/indexer.db',
     port: int(env, 'PORT', 8080, 1, 65535),
     pollMs: int(env, 'POLL_MS', 15_000, 1_000, 3_600_000),
-    accessGateOriginalId: env.ACCESS_GATE_ORIGINAL_ID || accessGateDeployment(network).originalId,
-    sealOriginalId: env.SEAL_ORIGINAL_ID || sealPoliciesDeployment(network).originalId,
+    accessGateOriginalId: packageId(env, 'ACCESS_GATE_ORIGINAL_ID', () => accessGateDeployment(network).originalId),
+    sealOriginalId: packageId(env, 'SEAL_ORIGINAL_ID', () => sealPoliciesDeployment(network).originalId),
     rateLimitPerSec: int(env, 'RATE_LIMIT_PER_SEC', 10, 1, 10_000),
     rateLimitBurst: int(env, 'RATE_LIMIT_BURST', 40, 1, 100_000),
   }
