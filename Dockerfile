@@ -8,8 +8,9 @@ COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY tsconfig.json ./
 COPY src ./src
+COPY scripts ./scripts
 # One self-contained ESM bundle: the runtime image needs no node_modules.
-RUN npm run build
+RUN npm run build && npm run licenses
 
 # ── Runtime stage ─────────────────────────────────────────────────────────────
 # distroless Node 24: no shell, no package manager; runs as nonroot (65532).
@@ -34,6 +35,10 @@ LABEL org.opencontainers.image.title="sui-indexer" \
 
 WORKDIR /app
 COPY --from=builder /src/dist/main.mjs ./main.mjs
+# The bundle carries no package metadata, so ship what an image scanner and a licence audit need:
+# the lockfile (so SBOM tools see the bundled npm packages) and the third-party licence texts.
+COPY --from=builder /src/package.json /src/package-lock.json ./
+COPY --from=builder /src/dist/THIRD_PARTY_LICENSES ./THIRD_PARTY_LICENSES
 
 USER 65532:65532
 EXPOSE 8080

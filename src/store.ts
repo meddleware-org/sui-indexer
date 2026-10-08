@@ -1,6 +1,22 @@
 import { DatabaseSync } from 'node:sqlite'
 import { randomBytes } from 'node:crypto'
 
+/**
+ * Thrown by {@link Store.bindPackages} when a stream was indexed under a different package. Clearing
+ * it would discard history the full node may already have pruned, so it needs an explicit
+ * confirmation (`REINDEX_CONFIRM=<stream>`), and a backup is taken first.
+ */
+export class PackageChangedError extends Error {
+  constructor(readonly streams: Stream[]) {
+    super(
+      `the package indexed by ${streams.join(', ')} changed (or its rows predate package binding). ` +
+        `Re-indexing deletes the stored history, which the full node may have pruned. ` +
+        `Set REINDEX_CONFIRM=${streams.join(',')} to back up the database and re-index from the start.`,
+    )
+    this.name = 'PackageChangedError'
+  }
+}
+
 /** An event stream this indexer keeps. */
 export type Stream = 'access-gate' | 'sealed-content'
 
@@ -57,6 +73,22 @@ CREATE TABLE IF NOT EXISTS events (
 ) STRICT;
 CREATE INDEX IF NOT EXISTS events_stream ON events (stream, id);
 CREATE INDEX IF NOT EXISTS events_gate ON events (stream, gate_id, id);
+-- Counters maintained inside the ingest transaction, so serving a page never scans a stream.
+CREATE TABLE IF NOT EXISTS stream_stats (
+  stream TEXT PRIMARY KEY,
+  from_checkpoint INTEGER,
+  latest_checkpoint INTEGER,
+  events INTEGER NOT NULL DEFAULT 0,
+  undecodable INTEGER NOT NULL DEFAULT 0,
+  gaps INTEGER NOT NULL DEFAULT 0
+) STRICT;
+CREATE TABLE IF NOT EXISTS gate_stats (
+  gate_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  n INTEGER NOT NULL,
+  PRIMARY KEY (gate_id, kind)
+) STRICT;
+CREATE TABLE IF NOT EXISTS gate_commission (gate_id TEXT PRIMARY KEY, total TEXT NOT NULL) STRICT;
 `
 
 /**
@@ -79,6 +111,36 @@ export class Store {
       this.gen = randomBytes(6).toString('hex')
       this.db.prepare(`INSERT INTO meta (key, value) VALUES ('generation', ?)`).run(this.gen)
     }
+    this.backfillStats()
+  }
+
+  /** Build the counters from existing rows once (databases created before they existed). */
+  private backfillStats(): void {
+    const done = this.db.prepare(`SELECT value FROM meta WHERE key = 'stats:v2'`).get()
+    if (done) return
+    this.db.exec('BEGIN')
+    try {
+      this.db.exec(`
+        DELETE FROM stream_stats; DELETE FROM gate_stats; DELETE FROM gate_commission;
+        INSERT INTO stream_stats (stream, from_checkpoint, latest_checkpoint, events)
+          SELECT stream, MIN(checkpoint), MAX(checkpoint), COUNT(*) FROM events GROUP BY stream;
+        INSERT INTO gate_stats (gate_id, kind, n)
+          SELECT gate_id, kind, COUNT(*) FROM events WHERE stream = 'access-gate' AND gate_id IS NOT NULL GROUP BY gate_id, kind;
+      `)
+      const stmt = this.db.prepare(
+        `SELECT gate_id AS g, commission_mist AS c FROM events WHERE stream = 'access-gate' AND gate_id IS NOT NULL AND commission_mist IS NOT NULL`,
+      )
+      stmt.setReadBigInts(true)
+      const totals = new Map<string, bigint>()
+      for (const r of stmt.iterate() as Iterable<{ g: string; c: bigint }>) totals.set(r.g, (totals.get(r.g) ?? 0n) + r.c)
+      const put = this.db.prepare('INSERT INTO gate_commission (gate_id, total) VALUES (?, ?)')
+      for (const [g, total] of totals) put.run(g, total.toString())
+      this.db.prepare(`INSERT INTO meta (key, value) VALUES ('stats:v2', '1')`).run()
+      this.db.exec('COMMIT')
+    } catch (err) {
+      this.db.exec('ROLLBACK')
+      throw err
+    }
   }
 
   /** Random per index build; API cursors carry it, and a cursor from another generation is refused. */
@@ -88,32 +150,43 @@ export class Store {
 
   /**
    * Bind each stream to the package (original id) it indexes. A stream recorded under a different
-   * package — or holding rows from before packages were recorded — is cleared (rows and cursor) so it
-   * re-reads its new package from the start, and the generation rotates so cursors served from the
-   * old index are refused. Call once at startup, before ingesting.
+   * package — or holding rows from before packages were recorded — would have to be cleared to
+   * re-read its new package. That discards history the full node may already have pruned, so it is
+   * refused with {@link PackageChangedError} unless the stream is listed in `confirm`; confirming
+   * first copies the database to `backupPath` (`VACUUM INTO`), then clears the stream's rows, cursor
+   * and counters and rotates the generation (so cursors served from the old index are refused).
+   * Call once at startup, before ingesting.
    *
    * @returns the streams that were cleared.
    */
-  bindPackages(packages: Readonly<Record<Stream, string>>): Stream[] {
-    const cleared: Stream[] = []
+  bindPackages(
+    packages: Readonly<Record<Stream, string>>,
+    opts: { confirm?: readonly Stream[]; backupPath?: string } = {},
+  ): Stream[] {
     const get = this.db.prepare('SELECT value FROM meta WHERE key = ?')
-    const set = this.db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value')
     const rows = this.db.prepare('SELECT COUNT(*) AS n FROM events WHERE stream = ?')
+    const pending: Stream[] = []
+    for (const [stream, pkg] of Object.entries(packages) as [Stream, string][]) {
+      const recorded = (get.get(`package:${stream}`) as { value: string } | undefined)?.value
+      if (recorded === pkg) continue
+      const hasRows = Number((rows.get(stream) as { n: number }).n) > 0
+      if (recorded !== undefined || hasRows || this.cursor(stream) !== null) pending.push(stream)
+    }
+    const confirmed = pending.filter((s) => opts.confirm?.includes(s))
+    if (pending.length !== confirmed.length) throw new PackageChangedError(pending.filter((s) => !confirmed.includes(s)))
+    if (confirmed.length > 0 && opts.backupPath) this.db.exec(`VACUUM INTO '${opts.backupPath.replace(/'/g, "''")}'`)
+
+    const set = this.db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value')
     this.db.exec('BEGIN')
     try {
-      for (const [stream, pkg] of Object.entries(packages) as [Stream, string][]) {
-        const key = `package:${stream}`
-        const recorded = (get.get(key) as { value: string } | undefined)?.value
-        const hasRows = Number((rows.get(stream) as { n: number }).n) > 0
-        if (recorded === pkg) continue
-        if (recorded !== undefined || hasRows || this.cursor(stream) !== null) {
-          this.db.prepare('DELETE FROM events WHERE stream = ?').run(stream)
-          this.db.prepare('DELETE FROM cursors WHERE stream = ?').run(stream)
-          cleared.push(stream)
-        }
-        set.run(key, pkg)
+      for (const stream of confirmed) {
+        this.db.prepare('DELETE FROM events WHERE stream = ?').run(stream)
+        this.db.prepare('DELETE FROM cursors WHERE stream = ?').run(stream)
+        this.db.prepare('DELETE FROM stream_stats WHERE stream = ?').run(stream)
+        if (stream === 'access-gate') this.db.exec('DELETE FROM gate_stats; DELETE FROM gate_commission;')
       }
-      if (cleared.length > 0) {
+      for (const [stream, pkg] of Object.entries(packages) as [Stream, string][]) set.run(`package:${stream}`, pkg)
+      if (confirmed.length > 0) {
         this.gen = randomBytes(6).toString('hex')
         set.run('generation', this.gen)
       }
@@ -122,7 +195,7 @@ export class Store {
       this.db.exec('ROLLBACK')
       throw err
     }
-    return cleared
+    return confirmed
   }
 
   cursor(stream: Stream): string | null {
@@ -145,6 +218,24 @@ export class Store {
     const setCursor = this.db.prepare(
       'INSERT INTO cursors (stream, cursor) VALUES (?, ?) ON CONFLICT (stream) DO UPDATE SET cursor = excluded.cursor',
     )
+    const bumpStream = this.db.prepare(
+      `INSERT INTO stream_stats (stream, from_checkpoint, latest_checkpoint, events) VALUES (?, ?, ?, 1)
+       ON CONFLICT (stream) DO UPDATE SET
+         from_checkpoint = CASE WHEN excluded.from_checkpoint IS NULL THEN from_checkpoint
+                                WHEN from_checkpoint IS NULL OR excluded.from_checkpoint < from_checkpoint THEN excluded.from_checkpoint
+                                ELSE from_checkpoint END,
+         latest_checkpoint = CASE WHEN excluded.latest_checkpoint IS NULL THEN latest_checkpoint
+                                  WHEN latest_checkpoint IS NULL OR excluded.latest_checkpoint > latest_checkpoint THEN excluded.latest_checkpoint
+                                  ELSE latest_checkpoint END,
+         events = events + 1`,
+    )
+    const bumpGate = this.db.prepare(
+      `INSERT INTO gate_stats (gate_id, kind, n) VALUES (?, ?, 1) ON CONFLICT (gate_id, kind) DO UPDATE SET n = n + 1`,
+    )
+    const readCommission = this.db.prepare('SELECT total FROM gate_commission WHERE gate_id = ?')
+    const writeCommission = this.db.prepare(
+      'INSERT INTO gate_commission (gate_id, total) VALUES (?, ?) ON CONFLICT (gate_id) DO UPDATE SET total = excluded.total',
+    )
     let added = 0
     this.db.exec('BEGIN')
     try {
@@ -161,7 +252,17 @@ export class Store {
           e.gateId,
           e.commissionMist,
         )
-        added += Number(res.changes)
+        if (Number(res.changes) === 0) continue // already stored: counters were bumped then
+        added++
+        const ckpt = e.checkpoint === null ? null : Number(e.checkpoint)
+        bumpStream.run(stream, ckpt, ckpt)
+        if (stream === 'access-gate' && e.gateId !== null) {
+          bumpGate.run(e.gateId, e.kind)
+          if (e.commissionMist !== null) {
+            const cur = (readCommission.get(e.gateId) as { total: string } | undefined)?.total
+            writeCommission.run(e.gateId, ((cur ? BigInt(cur) : 0n) + e.commissionMist).toString())
+          }
+        }
       }
       if (cursor !== null) setCursor.run(stream, cursor)
       this.db.exec('COMMIT')
@@ -221,34 +322,69 @@ export class Store {
     return row.id ?? 0
   }
 
-  /** Oldest and newest indexed checkpoints and the event count of `stream`. */
+  /** Oldest and newest indexed checkpoints and the event count of `stream` (maintained at ingest, O(1)). */
   coverage(stream: Stream): { fromCheckpoint: string | null; latestCheckpoint: string | null; events: number } {
     const row = this.db
-      .prepare('SELECT MIN(checkpoint) AS lo, MAX(checkpoint) AS hi, COUNT(*) AS n FROM events WHERE stream = ?')
-      .get(stream) as { lo: number | null; hi: number | null; n: number }
+      .prepare('SELECT from_checkpoint AS lo, latest_checkpoint AS hi, events AS n FROM stream_stats WHERE stream = ?')
+      .get(stream) as { lo: number | null; hi: number | null; n: number } | undefined
     return {
-      fromCheckpoint: row.lo === null ? null : String(row.lo),
-      latestCheckpoint: row.hi === null ? null : String(row.hi),
-      events: row.n,
+      fromCheckpoint: row?.lo == null ? null : String(row.lo),
+      latestCheckpoint: row?.hi == null ? null : String(row.hi),
+      events: row?.n ?? 0,
     }
   }
 
-  /** Per-gate counts by kind and the commission its mints paid. */
+  /** Events the stream's parser could not decode (skipped and counted), and cursor resets after pruning. */
+  health(stream: Stream): { undecodable: number; gaps: number } {
+    const row = this.db.prepare('SELECT undecodable, gaps FROM stream_stats WHERE stream = ?').get(stream) as
+      | { undecodable: number; gaps: number }
+      | undefined
+    return { undecodable: row?.undecodable ?? 0, gaps: row?.gaps ?? 0 }
+  }
+
+  /** Record `n` events skipped because they did not decode (the page still advances past them). */
+  noteUndecodable(stream: Stream, n: number): void {
+    this.db
+      .prepare(
+        `INSERT INTO stream_stats (stream, undecodable) VALUES (?, ?)
+         ON CONFLICT (stream) DO UPDATE SET undecodable = undecodable + excluded.undecodable`,
+      )
+      .run(stream, n)
+  }
+
+  /**
+   * The stored cursor points below what the full node still serves (its history was pruned while no
+   * event arrived to move the cursor). The events in between are gone for good, so restart from the
+   * node's earliest data: rows already stored are untouched (re-inserting is a no-op). Counted as a gap.
+   */
+  resetCursorAfterGap(stream: Stream, reason: string): void {
+    this.db.exec('BEGIN')
+    try {
+      this.db.prepare('DELETE FROM cursors WHERE stream = ?').run(stream)
+      this.db
+        .prepare(
+          `INSERT INTO stream_stats (stream, gaps) VALUES (?, 1)
+           ON CONFLICT (stream) DO UPDATE SET gaps = gaps + 1`,
+        )
+        .run(stream)
+      this.db
+        .prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value')
+        .run(`gap:${stream}`, JSON.stringify({ at: new Date().toISOString(), reason: reason.slice(0, 200) }))
+      this.db.exec('COMMIT')
+    } catch (err) {
+      this.db.exec('ROLLBACK')
+      throw err
+    }
+  }
+
+  /** Per-gate counts by kind and the commission its mints paid (maintained at ingest). */
   gateStats(gateId: string): { counts: Record<string, number>; commissionMist: bigint } {
     const counts: Record<string, number> = {}
-    for (const r of this.db
-      .prepare(`SELECT kind, COUNT(*) AS n FROM events WHERE stream = 'access-gate' AND gate_id = ? GROUP BY kind`)
-      .all(gateId) as { kind: string; n: number }[]) {
+    for (const r of this.db.prepare('SELECT kind, n FROM gate_stats WHERE gate_id = ?').all(gateId) as { kind: string; n: number }[]) {
       counts[r.kind] = r.n
     }
-    // Summed as bigint: many commissions can exceed SQLite's 64-bit SUM.
-    let commissionMist = 0n
-    const stmt = this.db.prepare(
-      `SELECT commission_mist AS c FROM events WHERE stream = 'access-gate' AND gate_id = ? AND commission_mist IS NOT NULL`,
-    )
-    stmt.setReadBigInts(true) // values above 2^53 must not round
-    for (const r of stmt.iterate(gateId) as Iterable<{ c: bigint }>) commissionMist += r.c
-    return { counts, commissionMist }
+    const total = (this.db.prepare('SELECT total FROM gate_commission WHERE gate_id = ?').get(gateId) as { total: string } | undefined)?.total
+    return { counts, commissionMist: total ? BigInt(total) : 0n }
   }
 
   close(): void {

@@ -1,6 +1,6 @@
 {
   "name": "@meddleware/sui-indexer",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "private": true,
   "description": "Lean read-indexer for Meddleware's Sui packages: polls access_gate and sealed_content events over gRPC into SQLite and serves cacheable GET pages.",
   "author": "MeddleWare <dev@meddleware.co.uk>",
@@ -20,12 +20,14 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "lint:js": "eslint .",
-    "lint": "npm run lint:js"
+    "lint": "npm run lint:js",
+    "licenses": "node scripts/third-party-licenses.mjs",
+    "check:licenses": "node scripts/third-party-licenses.mjs --check"
   },
   "dependencies": {
-    "@meddleware/access-gate-client": "^0.0.4",
-    "@meddleware/seal-client": "^0.0.15",
-    "@mysten/sui": "^2.33.1"
+    "@meddleware/access-gate-client": "^0.0.6",
+    "@meddleware/seal-client": "^0.0.16",
+    "@mysten/sui": "^2.33.2"
   },
   "devDependencies": {
     "@types/node": "~24.12.2",

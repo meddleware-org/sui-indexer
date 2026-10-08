@@ -2,6 +2,8 @@ import { normalizeSuiAddress } from '@mysten/sui/utils'
 import { accessGateDeployment } from '@meddleware/access-gate-client/deployments'
 import { sealPoliciesDeployment } from '@meddleware/seal-client/deployments'
 
+import type { Stream } from './store.js'
+
 export interface Config {
   /** The one network this instance indexes (it is also the first path segment of the API). */
   network: string
@@ -15,6 +17,8 @@ export interface Config {
   rateLimitPerSec: number
   /** Token-bucket capacity per client IP. */
   rateLimitBurst: number
+  /** Streams whose stored history may be deleted and re-indexed after a package change (`REINDEX_CONFIRM`). */
+  reindexConfirm: Stream[]
 }
 
 const DEFAULT_GRPC: Record<string, string> = {
@@ -36,6 +40,17 @@ function int(env: NodeJS.ProcessEnv, name: string, fallback: number, min: number
   const v = Number(raw)
   if (!Number.isInteger(v) || v < min || v > max) throw new Error(`${name} must be an integer in [${min}, ${max}], got ${raw}`)
   return v
+}
+
+/** `REINDEX_CONFIRM=access-gate,sealed-content`: the streams the operator agrees to delete and re-index. */
+function reindexConfirm(env: NodeJS.ProcessEnv): Stream[] {
+  const raw = env.REINDEX_CONFIRM
+  if (raw === undefined || raw === '') return []
+  const streams = raw.split(',').map((s) => s.trim())
+  for (const s of streams) {
+    if (s !== 'access-gate' && s !== 'sealed-content') throw new Error(`REINDEX_CONFIRM must list access-gate and/or sealed-content, got ${s}`)
+  }
+  return streams as Stream[]
 }
 
 /**
@@ -62,5 +77,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     sealOriginalId: packageId(env, 'SEAL_ORIGINAL_ID', () => sealPoliciesDeployment(network).originalId),
     rateLimitPerSec: int(env, 'RATE_LIMIT_PER_SEC', 10, 1, 10_000),
     rateLimitBurst: int(env, 'RATE_LIMIT_BURST', 40, 1, 100_000),
+    reindexConfirm: reindexConfirm(env),
   }
 }

@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.5] - 2026-10-08
+
+### Fixed
+
+- **The indexer no longer wedges when its cursor falls below the full node's retention.** A stream
+  whose cursor stopped advancing (no events for days) retried the same pruned cursor forever
+  ("requested data below earliest available") and `/healthz` stayed red. It now restarts from the
+  node's earliest data and counts a `gap`. Streams are polled independently, so one failing no longer
+  stops the other.
+- An event that does not decode no longer halts ingest: it is counted (`undecodable`), logged loudly
+  and skipped.
+
+### Changed
+
+- Coverage, gate stats and commission come from counters kept in the ingest transaction instead of
+  full-table scans (a coverage read was ~150 ms at 300k rows on the single request thread). Older
+  databases are rebuilt once at startup.
+- A package change no longer deletes history on start: it stops startup until `REINDEX_CONFIRM` names the
+  stream, backs the database up first (`VACUUM INTO`) and then clears it.
+- `/healthz` reports each stream (`ok`, `lastPollAgeMs`, `lastError`); head pages carry `latestCheckpoint`
+  and `polledAt`; `/coverage` adds `undecodable` and `gaps`.
+- Non-canonical spellings of a query get a cacheable `301` to the canonical form (one cache entry per
+  query); IPv6 clients share a rate-limit bucket per /64; the bucket map is capped; weak, listed and
+  wildcard `If-None-Match` revalidate.
+- Startup refuses a full node whose chain identifier does not match `NETWORK`; the node client is no
+  longer cast to the slice the indexer uses, so tsc checks it.
+- The image ships `package.json` + `package-lock.json` (so SBOM scanners see the bundled npm packages)
+  and `THIRD_PARTY_LICENSES`; CI checks the notices.
+- `@meddleware/seal-client` ^0.0.16, `@meddleware/access-gate-client` ^0.0.6.
+
 ## [0.0.4] - 2026-10-03
 
 ### Fixed

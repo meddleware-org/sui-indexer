@@ -65,14 +65,34 @@ export function toIndexed(stream: Stream, entry: CoreEventEntry, opts: IngestOpt
   return { ...base, kind: 'SealedContentPublished', gateId: pointer.gateId, commissionMist: null }
 }
 
+/** What the full node says when a cursor falls below the data it still serves (history pruned). */
+const PRUNED = /below earliest available|earliest available|has been pruned/i
+
+/** The streams this indexer keeps, in poll order. */
+const STREAMS = ['access-gate', 'sealed-content'] as const
+
+/** Per-stream poll state, for `/healthz` and the head pages. */
+export interface StreamHealth {
+  /** Epoch ms of the last poll of this stream that completed (0 before the first). */
+  lastSuccessAt: number
+  /** The error of the last poll, or null after a success. */
+  lastError: string | null
+}
+
 /**
  * Polls each stream forward from its stored cursor (ascending, so row ids follow ledger order) and
- * stores every recognised event with the cursor, atomically per page.
+ * stores every recognised event with the cursor, atomically per page. The streams are polled
+ * independently: one failing never stops the other. An event that does not decode is counted and
+ * skipped (the page advances past it), and a cursor that fell below the node's retention restarts
+ * from the node's earliest data instead of retrying forever.
  */
 export class Ingestor {
-  private lastSuccess = 0
   private timer: NodeJS.Timeout | undefined
   private stopped = false
+  private readonly state: Record<Stream, StreamHealth> = {
+    'access-gate': { lastSuccessAt: 0, lastError: null },
+    'sealed-content': { lastSuccessAt: 0, lastError: null },
+  }
 
   constructor(
     private readonly store: Store,
@@ -95,27 +115,57 @@ export class Ingestor {
       })
       const events: IndexedEvent[] = []
       let skipped = 0
+      let undecodable = 0
       for (const entry of res.events) {
-        const indexed = toIndexed(stream, entry, this.opts)
-        if (indexed) events.push(indexed)
-        else skipped++
+        try {
+          const indexed = toIndexed(stream, entry, this.opts)
+          if (indexed) events.push(indexed)
+          else skipped++
+        } catch (e) {
+          // A recognised event that does not decode (parser/package version skew, a truncated
+          // payload): do not let it stop the stream. Count it, log it loudly, and move past it.
+          undecodable++
+          this.opts.log?.(
+            `${stream}: UNDECODABLE event ${entry.transactionDigest}#${entry.eventIndex}: ${e instanceof Error ? e.message : String(e)}`,
+          )
+        }
       }
       if (skipped) this.opts.log?.(`${stream}: skipped ${skipped} unrecognised event(s)`)
       // A null endCursor (nothing further) keeps the stored position.
       added += this.store.ingest(stream, events, res.endCursor)
+      if (undecodable) this.store.noteUndecodable(stream, undecodable)
       if (res.endCursor) cursor = res.endCursor
       if (!res.hasNextPage) break
     }
     return added
   }
 
-  /** Poll both streams once. */
-  async poll(): Promise<void> {
-    for (const stream of ['access-gate', 'sealed-content'] as const) {
-      const added = await this.pollStream(stream)
+  /** Poll one stream, recovering from a pruned cursor, and record its health. */
+  private async pollOne(stream: Stream): Promise<void> {
+    try {
+      let added: number
+      try {
+        added = await this.pollStream(stream)
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e)
+        if (!PRUNED.test(message) || this.store.cursor(stream) === null) throw e
+        // The events between the stored cursor and the node's retention are gone for good.
+        this.opts.log?.(`${stream}: cursor is below the node's retention (${message}); restarting from its earliest data`)
+        this.store.resetCursorAfterGap(stream, message)
+        added = await this.pollStream(stream)
+      }
       if (added) this.opts.log?.(`${stream}: +${added}`)
+      this.state[stream] = { lastSuccessAt: Date.now(), lastError: null }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      this.state[stream] = { ...this.state[stream], lastError: message }
+      this.opts.log?.(`${stream}: poll failed: ${message}`)
     }
-    this.lastSuccess = Date.now()
+  }
+
+  /** Poll both streams once, independently. */
+  async poll(): Promise<void> {
+    for (const stream of STREAMS) await this.pollOne(stream)
   }
 
   /** Poll now and then every `intervalMs`; a failed poll is logged and retried next interval. */
@@ -136,8 +186,13 @@ export class Ingestor {
     clearTimeout(this.timer)
   }
 
-  /** Epoch ms of the last complete poll (0 before the first). */
+  /** Per-stream poll state. */
+  health(stream: Stream): StreamHealth {
+    return this.state[stream]
+  }
+
+  /** Epoch ms of the last poll in which EVERY stream succeeded (0 until then): the oldest stream's success. */
   get lastSuccessAt(): number {
-    return this.lastSuccess
+    return Math.min(...STREAMS.map((s) => this.state[s].lastSuccessAt))
   }
 }

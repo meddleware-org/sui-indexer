@@ -3,7 +3,7 @@ import { listAccessGateEvents } from '@meddleware/access-gate-client'
 import { listSealedContent } from '@meddleware/seal-client'
 import { Store } from '../src/store.js'
 import { RateLimiter } from '../src/ratelimit.js'
-import { handle, type ApiContext } from '../src/api.js'
+import { clientKey, handle, type ApiContext } from '../src/api.js'
 import { toIndexed } from '../src/ingest.js'
 import { AG, GATE_A, GATE_B, SEAL, consumed, minted, sealed } from './fixtures.js'
 
@@ -19,10 +19,14 @@ function setup(limiter = new RateLimiter(1000, 1000)) {
     'c',
   )
   store.ingest('sealed-content', [sealed(GATE_A, 6, 'one'), sealed(GATE_B, 7, 'other'), sealed(GATE_A, 8, 'two')].map((e) => toIndexed('sealed-content', e, opts)!), 's')
-  let lastPoll = Date.now()
-  const ctx: ApiContext = { store, network: 'testnet', limiter, lastPollAt: () => lastPoll, pollMs: 15_000 }
+  const polls: Record<'access-gate' | 'sealed-content', { lastSuccessAt: number; lastError: string | null }> = {
+    'access-gate': { lastSuccessAt: Date.now(), lastError: null },
+    'sealed-content': { lastSuccessAt: Date.now(), lastError: null },
+  }
+  const ctx: ApiContext = { store, network: 'testnet', limiter, health: (s) => polls[s], pollMs: 15_000 }
   const get = (url: string, headers: Record<string, string> = {}) => handle(ctx, { method: 'GET', url, headers, remoteAddress: '10.0.0.1' })
-  return { store, ctx, get, setLastPoll: (t: number) => (lastPoll = t) }
+  const setLastPoll = (t: number, stream: 'access-gate' | 'sealed-content' = 'access-gate') => (polls[stream].lastSuccessAt = t)
+  return { store, ctx, get, setLastPoll, polls }
 }
 
 const body = (r: { body: string }) => JSON.parse(r.body)
@@ -55,7 +59,7 @@ describe('events pages', () => {
 
   it('filters by kinds and gate', () => {
     const { get } = setup()
-    const b = body(get(`/v1/testnet/access-gate/events?kinds=AccessConsumed&gate=0xa`))
+    const b = body(get(`/v1/testnet/access-gate/events?kinds=AccessConsumed&gate=${GATE_A}`))
     expect(b.events).toHaveLength(1)
     expect(b.events[0].eventType).toMatch(/AccessConsumedEvent$/)
   })
@@ -104,22 +108,94 @@ describe('stats, coverage and health', () => {
   it('reports coverage per stream', () => {
     const { get } = setup()
     const b = body(get('/v1/testnet/coverage'))
-    expect(b.accessGate).toEqual({ fromCheckpoint: '1', latestCheckpoint: '5', events: 5 })
+    expect(b.accessGate).toEqual({ fromCheckpoint: '1', latestCheckpoint: '5', events: 5, undecodable: 0, gaps: 0 })
     expect(b.sealedContent.events).toBe(3)
   })
 
-  it('healthz is 503 before the first poll and after polls stall', () => {
-    const { get, setLastPoll } = setup()
+  it('healthz is 503 before the first poll and after polls stall, and names the stream and its error', () => {
+    const { get, setLastPoll, polls } = setup()
     expect(get('/healthz').status).toBe(200)
     setLastPoll(0)
     expect(get('/healthz').status).toBe(503)
     setLastPoll(Date.now() - 5 * 15_000 - 1)
-    expect(get('/healthz').status).toBe(503)
+    polls['access-gate'].lastError = 'requested data below earliest available'
+    const res = get('/healthz')
+    expect(res.status).toBe(503)
+    expect(body(res).streams['access-gate']).toMatchObject({ ok: false, lastError: 'requested data below earliest available' })
+    expect(body(res).streams['sealed-content'].ok).toBe(true) // the other stream is fine
     expect(get('/readyz').status).toBe(200) // still serving
+  })
+
+  it('head pages say how fresh the index is; older pages stay immutable and free of it', () => {
+    const { get } = setup()
+    const head = body(get('/v1/testnet/access-gate/events?limit=2'))
+    expect(head).toMatchObject({ latestCheckpoint: '5', polledAt: expect.any(Number) })
+    const older = body(get(`/v1/testnet/access-gate/events?limit=2&before=${head.cursor}`))
+    expect(older).not.toHaveProperty('polledAt')
+    expect(older).not.toHaveProperty('latestCheckpoint')
+  })
+})
+
+describe('canonical URLs (one cache entry per query)', () => {
+  const loc = (r: { status: number; headers: Record<string, string> }) => (r.status === 301 ? r.headers.Location : null)
+
+  it('redirects other spellings of a query to the canonical form, cacheably', () => {
+    const { get } = setup()
+    const full = `0x${'0'.repeat(63)}a`
+    expect(loc(get('/v1/testnet/access-gate/events?gate=0xA'))).toBe(`/v1/testnet/access-gate/events?gate=${full}`)
+    expect(loc(get('/v1/testnet/access-gate/events?gate=0x0a'))).toBe(`/v1/testnet/access-gate/events?gate=${full}`)
+    expect(loc(get(`/v1/testnet/access-gate/events?gate=${full.toUpperCase().replace('0X', '0x')}`))).toBe(`/v1/testnet/access-gate/events?gate=${full}`)
+    expect(loc(get('/v1/testnet/access-gate/events?limit=05'))).toBe('/v1/testnet/access-gate/events?limit=5')
+    expect(loc(get('/v1/testnet/access-gate/events?kinds=AccessMinted,AccessConsumed,AccessMinted'))).toBe(
+      '/v1/testnet/access-gate/events?kinds=AccessConsumed%2CAccessMinted',
+    )
+    expect(loc(get('/v1/testnet/gates/0xA/stats'))).toBe(`/v1/testnet/gates/${full}/stats`)
+    const r = get('/v1/testnet/access-gate/events?limit=05')
+    expect(r.headers['Cache-Control']).toBe('public, max-age=86400')
+    expect(r.body).toBe('')
+  })
+
+  it('serves canonical queries (what the client packages send) without a redirect', () => {
+    const { get } = setup()
+    const g = `0x${'0'.repeat(63)}a`
+    for (const url of [
+      `/v1/testnet/access-gate/events?kinds=AccessConsumed%2CAccessMinted&gate=${g}&limit=10`,
+      `/v1/testnet/access-gate/events?gate=${g}&limit=5`,
+      '/v1/testnet/coverage',
+      `/v1/testnet/gates/${g}/stats`,
+    ]) {
+      expect(get(url).status, url).toBe(200)
+    }
+  })
+
+  it('the redirect target is itself canonical (no loops)', () => {
+    const { get } = setup()
+    const first = get('/v1/testnet/access-gate/events?limit=05&gate=0xA')
+    expect(first.status).toBe(301)
+    expect(get(first.headers.Location!).status).toBe(200)
   })
 })
 
 describe('transport rules', () => {
+  it('keys IPv6 clients by their /64 and caps the bucket map', () => {
+    expect(clientKey('2001:db8:1:2:aaaa:bbbb:cccc:dddd')).toBe(clientKey('2001:db8:1:2::1'))
+    expect(clientKey('2001:db8:1:2::1')).not.toBe(clientKey('2001:db8:1:3::1'))
+    expect(clientKey('203.0.113.9')).toBe('203.0.113.9')
+    expect(clientKey('::ffff:203.0.113.9')).toBe('::ffff:203.0.113.9')
+    const limiter = new RateLimiter(1, 1, () => 0, 100)
+    for (let i = 0; i < 1000; i++) limiter.take(`k${i}`)
+    expect(limiter.size).toBeLessThanOrEqual(100)
+  })
+
+  it('revalidates with weak, listed or wildcard If-None-Match', () => {
+    const { get } = setup()
+    const etag = get('/v1/testnet/access-gate/events').headers.ETag!
+    for (const h of [etag, `W/${etag}`, `"zzz", ${etag}`, '*']) {
+      expect(get('/v1/testnet/access-gate/events', { 'if-none-match': h }).status, h).toBe(304)
+    }
+    expect(get('/v1/testnet/access-gate/events', { 'if-none-match': '"other"' }).status).toBe(200)
+  })
+
   it('rate-limits per client IP, preferring CF-Connecting-IP, and never limits healthz', () => {
     const { get } = setup(new RateLimiter(1, 2))
     expect(get('/v1/testnet/coverage', { 'cf-connecting-ip': '1.1.1.1' }).status).toBe(200)

@@ -36,3 +36,6 @@ jobs:
 
       - name: Bundle
         run: npm run build
+
+      - name: Third-party licence notices
+        run: npm run check:licenses && test -s dist/THIRD_PARTY_LICENSES && grep -q 'Apache License' dist/THIRD_PARTY_LICENSES

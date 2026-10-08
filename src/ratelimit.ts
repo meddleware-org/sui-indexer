@@ -10,6 +10,8 @@ export class RateLimiter {
     private readonly perSec: number,
     private readonly burst: number,
     private readonly now: () => number = Date.now,
+    /** Most buckets kept; the oldest are evicted past it, so memory stays bounded whatever the key churn. */
+    private readonly maxBuckets = 50_000,
   ) {}
 
   /** Take one token for `key`; false when the bucket is empty. */
@@ -21,7 +23,9 @@ export class RateLimiter {
     b.at = t
     const ok = b.tokens >= 1
     if (ok) b.tokens -= 1
+    this.buckets.delete(key) // re-insert so Map order is least-recently-used first
     this.buckets.set(key, b)
+    while (this.buckets.size > this.maxBuckets) this.buckets.delete(this.buckets.keys().next().value as string)
     return ok
   }
 

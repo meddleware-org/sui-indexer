@@ -1,7 +1,7 @@
 import { createServer } from 'node:http'
 import { SuiGrpcClient } from '@mysten/sui/grpc'
 import { loadConfig } from './config.js'
-import { Store } from './store.js'
+import { PackageChangedError, Store, type Stream } from './store.js'
 import { Ingestor, type EventSource } from './ingest.js'
 import { RateLimiter } from './ratelimit.js'
 import { handle } from './api.js'
@@ -10,13 +10,35 @@ const log = (message: string) => console.log(`${new Date().toISOString()} ${mess
 
 const config = loadConfig()
 const store = new Store(config.dbPath)
-const cleared = store.bindPackages({
-  'access-gate': config.accessGateOriginalId,
-  'sealed-content': config.sealOriginalId,
-})
-if (cleared.length > 0) log(`package changed for ${cleared.join(', ')}: cleared and re-indexing from the start`)
+let cleared: Stream[]
+try {
+  cleared = store.bindPackages(
+    { 'access-gate': config.accessGateOriginalId, 'sealed-content': config.sealOriginalId },
+    { confirm: config.reindexConfirm, backupPath: `${config.dbPath}.bak-${Date.now()}` },
+  )
+} catch (e) {
+  if (e instanceof PackageChangedError) {
+    log(`refusing to start: ${e.message}`)
+    process.exit(1)
+  }
+  throw e
+}
+if (cleared.length > 0) log(`package changed for ${cleared.join(', ')}: backed up, cleared and re-indexing from the start`)
 const client = new SuiGrpcClient({ network: config.network as 'testnet', baseUrl: config.grpcUrl })
-const ingestor = new Ingestor(store, client as unknown as EventSource, {
+// The node must serve the network this instance is configured for: a mainnet node behind a testnet
+// instance would index nothing and stay green.
+const KNOWN_CHAIN_IDS: Record<string, string> = { testnet: '4c78adac', mainnet: '35834a8a' }
+const want = KNOWN_CHAIN_IDS[config.network]
+if (want) {
+  const { chainIdentifier } = await client.core.getChainIdentifier()
+  if (chainIdentifier !== want) {
+    log(`refusing to start: ${config.grpcUrl} serves chain ${chainIdentifier}, not ${config.network} (${want})`)
+    process.exit(1)
+  }
+}
+// No cast: tsc checks the real client's listEvents against the slice this indexer relies on.
+const source: EventSource = client
+const ingestor = new Ingestor(store, source, {
   accessGateOriginalId: config.accessGateOriginalId,
   sealOriginalId: config.sealOriginalId,
   log,
@@ -26,7 +48,7 @@ const limiter = new RateLimiter(config.rateLimitPerSec, config.rateLimitBurst)
 const server = createServer((req, res) => {
   try {
     const out = handle(
-      { store, network: config.network, limiter, lastPollAt: () => ingestor.lastSuccessAt, pollMs: config.pollMs },
+      { store, network: config.network, limiter, health: (s) => ingestor.health(s), pollMs: config.pollMs },
       { method: req.method ?? 'GET', url: req.url ?? '/', headers: req.headers, remoteAddress: req.socket.remoteAddress },
     )
     res.writeHead(out.status, out.headers).end(out.body)
