@@ -4,6 +4,8 @@ on:
   push:
     branches: ["main"]
   pull_request:
+  # The release workflow runs the same checks on the tagged commit.
+  workflow_call:
 
 permissions:
   contents: read
@@ -39,3 +41,33 @@ jobs:
 
       - name: Third-party licence notices
         run: npm run check:licenses && test -s dist/THIRD_PARTY_LICENSES && grep -q 'Apache License' dist/THIRD_PARTY_LICENSES
+
+  image:
+    name: Image (configuration scan, build, scan, smoke test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Trivy configuration scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: config
+          scan-ref: .
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          version: v0.74.0
+
+      - name: Build (not pushed)
+        run: docker build --tag sui-indexer:ci .
+
+      - name: Scan the image (fail on fixable CRITICAL/HIGH)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: sui-indexer:ci
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          ignore-unfixed: true
+          version: v0.74.0
+
+      - name: Smoke test
+        run: bash scripts/smoke.sh sui-indexer:ci

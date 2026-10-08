@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- CI and release gate: the tag workflow reuses `Node CI` on the tagged commit, which now also scans the
+  Dockerfile configuration and the built image with Trivy, and smoke-tests the image
+  (`scripts/smoke.sh`: non-root, `/readyz`, security headers, `/healthz` 503 before any poll). The
+  published image is scanned before it is signed; the version label drops the leading `v`; the
+  `cosign verify` command is pinned to the workflow identity in the run summary.
+- `.dockerignore` excludes `.env*` and local database files from the build context.
+
+### Documented
+
+- A package upgrade that adds an event struct is not indexed: the struct is typed at the upgrade's
+  package id, while the module filter and the parsers use the original id. New event types therefore
+  need a fresh publish (the project republishes before v0.2 anyway); see CLAUDE.md.
+
 ## [0.0.6] - 2026-10-08
 
 ### Changed

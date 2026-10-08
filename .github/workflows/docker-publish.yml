@@ -30,15 +30,12 @@ permissions:
   contents: read
 
 jobs:
-  verify:
-    name: Verify (type-check + lint + test)
+  version:
+    name: Tag matches the package version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: '24'
-      - name: Tag matches the package version
+      - name: Compare
         env:
           TAG: ${{ github.ref_name }}
         run: |
@@ -47,21 +44,17 @@ jobs:
             echo "::error::tag ${TAG} does not match package.json version ${VERSION}"
             exit 1
           fi
-      - name: Install dependencies
-        run: npm ci
-      - name: Audit dependencies
-        run: npm audit --audit-level=high
-      - name: Type-check
-        run: npm run type-check
-      - name: Lint
-        run: npm run lint
-      - name: Test
-        run: npm test
+
+  # The release runs exactly what CI runs (type-check, lint, tests, bundle, licences, configuration and
+  # image scans, container smoke test) on the tagged commit, so no check can be skipped by tagging.
+  verify:
+    name: Verify (CI checks)
+    uses: ./.github/workflows/node-ci.yml
 
   publish-public:
     name: Publish (quay.io + Docker Hub)
     runs-on: ubuntu-latest
-    needs: verify
+    needs: [version, verify]
     permissions:
       contents: read
       id-token: write
@@ -118,12 +111,21 @@ jobs:
           sbom: false
           provenance: mode=max
           build-args: |
-            VERSION=${{ github.ref_name }}
+            VERSION=${{ steps.meta.outputs.version }}
             VENDOR=${{ vars.VENDOR || 'Meddleware' }}
             DESCRIPTION=${{ vars.DESCRIPTION || 'Lean read-indexer for the Meddleware Sui packages (access_gate, sealed_content).' }}
             SOURCE_URL=${{ vars.SOURCE_URL || 'https://github.com/meddleware-org/sui-indexer' }}
             DOCUMENTATION_URL=${{ vars.DOCUMENTATION_URL || 'https://github.com/meddleware-org/sui-indexer#readme' }}
             IMAGE_URL=${{ vars.IMAGE_URL || 'https://quay.io/meddleware-org/sui-indexer' }}
+
+      - name: Scan the published image (fail on fixable CRITICAL/HIGH)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: quay.io/${{ vars.QUAY_NAMESPACE || 'meddleware-org' }}/${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          ignore-unfixed: true
+          version: v0.74.0
 
       - name: Install cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
@@ -172,11 +174,12 @@ jobs:
       - name: Summary
         run: |
           echo "Published & signed @ digest: ${{ steps.build.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Verify: cosign verify --certificate-identity-regexp '^https://github.com/meddleware-org/sui-indexer/\\.github/workflows/docker-publish\\.yml@refs/tags/v' --certificate-oidc-issuer https://token.actions.githubusercontent.com <image>@<digest>" >> "$GITHUB_STEP_SUMMARY"
 
   publish-private:
     name: Publish (self-hosted registry)
     runs-on: ubuntu-latest
-    needs: verify
+    needs: [version, verify]
     continue-on-error: true
     permissions:
       contents: read

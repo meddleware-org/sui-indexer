@@ -4,3 +4,7 @@ tests
 .git
 .github
 *.md
+.env*
+*.db
+*.db-*
+*.bak-*

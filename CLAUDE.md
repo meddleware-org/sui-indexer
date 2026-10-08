@@ -21,6 +21,10 @@ A read-indexer for display data. See [README.md](README.md) for the API and conf
   silently: startup fails with `PackageChangedError` until `REINDEX_CONFIRM` names the stream, then the
   database is backed up (`VACUUM INTO`), the stream cleared and the generation rotated. Never mix two
   packages' events in a stream, and never delete history without that confirmation.
+- **New event types need a fresh publish.** The module filter and the client parsers match the
+  package's *original* id. An event struct added by a later compatible upgrade is typed at the
+  upgrade's id, so this indexer would not see it (and would not log it: the node never returns it).
+  Adding one means a fresh publish and a `REINDEX_CONFIRM` rebind, not an upgrade.
 - **Never stall on one bad input.** Streams are polled independently; an undecodable event is counted
   and skipped; a cursor below the node's retention restarts from its earliest data (a counted gap).
   `/healthz` reports each stream.
