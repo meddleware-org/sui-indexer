@@ -5,6 +5,7 @@ import { PackageChangedError, Store, type Stream } from './store.js'
 import { Ingestor, type EventSource } from './ingest.js'
 import { RateLimiter } from './ratelimit.js'
 import { handle } from './api.js'
+import { KNOWN_CHAIN_IDS, shortChainId } from './chain.js'
 
 const log = (message: string) => console.log(`${new Date().toISOString()} ${message}`)
 
@@ -27,12 +28,12 @@ if (cleared.length > 0) log(`package changed for ${cleared.join(', ')}: backed u
 const client = new SuiGrpcClient({ network: config.network as 'testnet', baseUrl: config.grpcUrl })
 // The node must serve the network this instance is configured for: a mainnet node behind a testnet
 // instance would index nothing and stay green.
-const KNOWN_CHAIN_IDS: Record<string, string> = { testnet: '4c78adac', mainnet: '35834a8a' }
 const want = KNOWN_CHAIN_IDS[config.network]
 if (want) {
   const { chainIdentifier } = await client.core.getChainIdentifier()
-  if (chainIdentifier !== want) {
-    log(`refusing to start: ${config.grpcUrl} serves chain ${chainIdentifier}, not ${config.network} (${want})`)
+  const got = shortChainId(chainIdentifier)
+  if (got !== want) {
+    log(`refusing to start: ${config.grpcUrl} serves chain ${got}, not ${config.network} (${want})`)
     process.exit(1)
   }
 }
