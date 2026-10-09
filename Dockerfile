@@ -15,7 +15,7 @@ RUN npm run build && npm run licenses
 # ── Runtime stage ─────────────────────────────────────────────────────────────
 # distroless Node 24: no shell, no package manager; runs as nonroot (65532).
 # To bump: skopeo inspect --format '{{.Digest}}' docker://gcr.io/distroless/nodejs24-debian13:nonroot
-FROM gcr.io/distroless/nodejs24-debian13:nonroot@sha256:bb6b03d81066993293a10feda7250e8e1cc034035fe9b61cfceededa7c8bf04d
+FROM gcr.io/distroless/nodejs24-debian13:nonroot@sha256:9eeb7f5887d0e239e78264b06f7f11d2e14be534050481803a9e4728fcdd278e
 
 ARG VERSION=dev
 ARG VENDOR="Meddleware"
