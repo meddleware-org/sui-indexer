@@ -1,7 +1,7 @@
 # ── Build stage ───────────────────────────────────────────────────────────────
 # Bases pinned by digest for reproducible builds; the tags are kept for readability.
 # To bump: skopeo inspect --format '{{.Digest}}' docker://docker.io/library/node:24-trixie-slim
-FROM docker.io/library/node:24-trixie-slim@sha256:8ec5d7557396cfe32d21c3f9c13072355ceab22b584578ca4bb28af31120cffe AS builder
+FROM docker.io/library/node:25-trixie-slim@sha256:aabbe39553d15ede8a97cc60c9e1a97034ff772afcf696ea42b94e7f5f2ec71b AS builder
 
 WORKDIR /src
 COPY package.json package-lock.json ./
