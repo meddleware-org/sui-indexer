@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.7] - 2026-10-09
+
+### Changed
+
+- Depends on access-gate-client ^0.0.8 and seal-client ^0.0.19; indexes the 2026-10-09 testnet publications (rebinding needs REINDEX_CONFIRM, see README)
+
 ## [Unreleased]
 
 ### Changed
