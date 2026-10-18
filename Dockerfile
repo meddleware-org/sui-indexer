@@ -36,7 +36,8 @@ LABEL org.opencontainers.image.title="sui-indexer" \
 WORKDIR /app
 COPY --from=builder /src/dist/main.mjs ./main.mjs
 # The bundle carries no package metadata, so ship what an image scanner and a licence audit need:
-# the lockfile (so SBOM tools see the bundled npm packages) and the third-party licence texts.
+# the lockfile (for scanners that read lockfiles in images; the release also attests an SBOM generated from
+# it, because syft's image scan does not) and the third-party licence texts.
 COPY --from=builder /src/package.json /src/package-lock.json ./
 COPY --from=builder /src/dist/THIRD_PARTY_LICENSES ./THIRD_PARTY_LICENSES
 

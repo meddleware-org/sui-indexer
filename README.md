@@ -6,7 +6,9 @@ serves cacheable GET pages. Apps use it to list history cheaply and fall back to
 it is unavailable.
 
 - **One process.** Node 24, `node:sqlite` (WAL) and `node:http`, shipped as one esbuild bundle on
-  distroless. About 110 MB RSS at 3.5k req/s on a laptop.
+  distroless. A one-off laptop
+  measurement against a small database (not a benchmark) gave about 110 MB RSS at 3.5k req/s; request cost does
+  not grow with history, memory is bounded by the page cache.
 - **Same decoding as the apps.** Events are decoded with `@meddleware/access-gate-client` and
   `@meddleware/seal-client`. Rows are served verbatim (BCS in base64), and the clients decode and
   type-check them again.
@@ -53,7 +55,7 @@ All routes are `GET`, and responses are JSON with `Access-Control-Allow-Origin: 
 | Variable | Default |
 | --- | --- |
 | `NETWORK` | `testnet` (the one network this instance serves) |
-| `GRPC_URL` | the public Mysten full node for `NETWORK` (https required) |
+| `GRPC_URL` | the public Mysten full node for `NETWORK` (`https` required; plain `http` only for `localhost` and `127.0.0.1`) |
 | `DB_PATH` | `/data/indexer.db` |
 | `PORT` | `8080` |
 | `POLL_MS` | `15000` |
@@ -74,8 +76,12 @@ All routes are `GET`, and responses are JSON with `Access-Control-Allow-Origin: 
 - **Counters.** Coverage, gate stats and commission are maintained at ingest, so serving a page never
   scans a stream (a scan took ~150 ms at 300k rows).
 - **Chain identity.** At startup the node's chain identifier must match `NETWORK` (testnet, mainnet).
-- **Image contents.** The image carries `package.json`, `package-lock.json` (so SBOM tools see the
-  bundled packages) and `THIRD_PARTY_LICENSES`.
+- **Image contents.** The image carries `package.json`, `package-lock.json` (for scanners that read
+  lockfiles, such as Trivy) and `THIRD_PARTY_LICENSES`.
+- **SBOMs.** The image is one esbuild bundle, so an image scan (syft) sees only the OS packages. Each
+  release therefore attests two SPDX documents to the image digest: the image SBOM, and the production
+  npm dependencies from the lockfile (`npm sbom --omit dev`, checked by `scripts/check-sbom.mjs`).
+  `cosign verify-attestation --type spdxjson <image>@<digest>` returns both.
 
 ## Development
 

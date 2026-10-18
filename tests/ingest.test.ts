@@ -32,7 +32,8 @@ describe('toIndexed', () => {
 describe('Ingestor', () => {
   it('stores every page with its cursor, ascending, and resumes from the cursor', async () => {
     const store = new Store(':memory:')
-    const pages = { [AG_FILTER]: [[minted(GATE_A, 1)], [consumed(GATE_A, 2), minted(GATE_B, 3)]], [SEAL_FILTER]: [[sealed(GATE_A, 4)]] }
+    const agPages = [[minted(GATE_A, 1)], [consumed(GATE_A, 2), minted(GATE_B, 3)]]
+    const pages = { [AG_FILTER]: agPages, [SEAL_FILTER]: [[sealed(GATE_A, 4)]] }
     const source = fakeSource(pages)
     const spy = vi.spyOn(source.core, 'listEvents')
     const ingestor = new Ingestor(store, source, opts)
@@ -43,10 +44,10 @@ describe('Ingestor', () => {
     expect(ingestor.lastSuccessAt).toBeGreaterThan(0)
 
     // A later poll continues after the stored cursor; nothing is duplicated.
-    pages[AG_FILTER].push([minted(GATE_A, 9)])
+    agPages.push([minted(GATE_A, 9)])
     spy.mockClear()
     await ingestor.poll()
-    expect(spy.mock.calls[0][0]).toMatchObject({ after: '1', order: 'ascending' })
+    expect(spy.mock.calls[0]?.[0]).toMatchObject({ after: '1', order: 'ascending' })
     expect(store.coverage('access-gate')).toMatchObject({ latestCheckpoint: '9', events: 4 })
   })
 
@@ -87,7 +88,8 @@ describe('Ingestor', () => {
     const store = new Store(':memory:')
     store.ingest('access-gate', [toIndexed('access-gate', consumed(GATE_A, 3), opts)!], null)
     const [row] = store.page('access-gate', { limit: 1 }).rows
-    const decoded = parseAccessGateEvent({ ...row, bcs: row.bcs }, AG)
+    if (!row) throw new Error('the stored page must hold the event just ingested')
+    const decoded = parseAccessGateEvent(row, AG)
     expect(decoded).toMatchObject({ kind: 'AccessConsumed', gateId: GATE_A })
   })
 })

@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.0.10] - 2026-10-18
+
+### Added
+
+- The release attests a second SPDX SBOM of the bundled production npm dependencies (`npm sbom --omit dev`),
+  because the image SBOM sees only OS packages; `scripts/check-sbom.mjs` checks it against the lockfile in CI
+  and in the release (a missing package fails the build)
+
+### Changed
+
+- `noUncheckedIndexedAccess` is on; the two guarded sites in `src/` and five in tests are fixed
+- Operator-keyed lookups (`NETWORK` to default gRPC URL and chain id) use `Map`s, so inherited names such as
+  `constructor` are not networks
+- `@meddleware/access-gate-client` ^0.0.9, `@meddleware/seal-client` ^0.0.20
+
 ## [0.0.9] - 2026-10-09
 
 ### Changed
@@ -22,11 +39,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Depends on access-gate-client ^0.0.8 and seal-client ^0.0.19; indexes the 2026-10-09 testnet publications (rebinding needs REINDEX_CONFIRM, see README)
-
-## [Unreleased]
-
-### Changed
-
 - CI and release gate: the tag workflow reuses `Node CI` on the tagged commit, which now also scans the
   Dockerfile configuration and the built image with Trivy, and smoke-tests the image
   (`scripts/smoke.sh`: non-root, `/readyz`, security headers, `/healthz` 503 before any poll). The

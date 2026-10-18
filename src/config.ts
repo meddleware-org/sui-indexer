@@ -21,10 +21,12 @@ export interface Config {
   reindexConfirm: Stream[]
 }
 
-const DEFAULT_GRPC: Record<string, string> = {
-  testnet: 'https://fullnode.testnet.sui.io:443',
-  mainnet: 'https://fullnode.mainnet.sui.io:443',
-}
+// A Map, not a plain object: the key is the operator's `NETWORK` string, and `DEFAULT_GRPC['constructor']`
+// would resolve to an inherited function.
+const DEFAULT_GRPC: ReadonlyMap<string, string> = new Map([
+  ['testnet', 'https://fullnode.testnet.sui.io:443'],
+  ['mainnet', 'https://fullnode.mainnet.sui.io:443'],
+])
 
 /** A package original-id override: `0x` + hex, normalised so the stored binding compares exactly. */
 function packageId(env: NodeJS.ProcessEnv, name: string, fallback: () => string): string {
@@ -61,7 +63,7 @@ function reindexConfirm(env: NodeJS.ProcessEnv): Stream[] {
  */
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const network = env.NETWORK || 'testnet'
-  const grpcUrl = env.GRPC_URL || DEFAULT_GRPC[network]
+  const grpcUrl = env.GRPC_URL || DEFAULT_GRPC.get(network)
   if (!grpcUrl) throw new Error(`GRPC_URL is required for network ${network}`)
   const url = new URL(grpcUrl)
   if (url.protocol !== 'https:' && url.hostname !== 'localhost' && url.hostname !== '127.0.0.1') {

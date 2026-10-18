@@ -18,6 +18,13 @@ describe('loadConfig', () => {
     expect(() => loadConfig({ NETWORK: 'devnet', GRPC_URL: 'https://n.example' })).toThrow(/no access_gate deployment/)
   })
 
+  it('treats NETWORK as data: inherited Object.prototype names are not networks (F20)', () => {
+    for (const network of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
+      expect(() => loadConfig({ NETWORK: network })).toThrow(new RegExp(`GRPC_URL is required for network ${network}`))
+      expect(() => loadConfig({ NETWORK: network, GRPC_URL: 'https://n.example' })).toThrow(/no access_gate deployment/)
+    }
+  })
+
   it('validates and normalises package-id overrides', () => {
     const c = loadConfig({ ACCESS_GATE_ORIGINAL_ID: '0xABC', SEAL_ORIGINAL_ID: `0x${'D'.repeat(64)}` })
     expect(c.accessGateOriginalId).toBe(`0x${'0'.repeat(61)}abc`)

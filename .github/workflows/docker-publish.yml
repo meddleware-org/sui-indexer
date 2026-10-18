@@ -3,7 +3,7 @@ name: Publish (Docker)
 #
 # Supply-chain controls (verifiable by any anonymous operator):
 #   - Multi-arch build (linux/amd64, linux/arm64) via Buildx/QEMU
-#   - SBOM (SPDX) + SLSA provenance attached to the image by BuildKit
+#   - SPDX SBOMs (image + bundled npm packages) attested with cosign; SLSA provenance by BuildKit
 #   - Keyless cosign signatures (Sigstore Fulcio/Rekor) over the image digest
 #   - GitHub-native build-provenance attestation
 #   - `latest` is published ONLY for stable (non-pre-release) semver tags
@@ -139,7 +139,11 @@ jobs:
           cosign sign --yes "quay.io/${QUAY_NS}/${IMAGE}@${DIGEST}"
           cosign sign --yes "docker.io/${DOCKERHUB_NS}/${IMAGE}@${DIGEST}"
 
-      # SBOM of the published image, attached as a signed cosign attestation (SPDX JSON).
+      # Two SPDX SBOMs are attested, because the image ships one esbuild bundle (IMG-M8 / F18):
+#   1. the published image (Debian base, node, ...): syft cannot see the bundled npm packages in it;
+#   2. the production npm dependencies from package-lock.json (`npm sbom --omit dev`), checked against
+#      the lockfile by scripts/check-sbom.mjs so a missing package stops the release.
+# `cosign verify-attestation --type spdxjson` returns both; the npm one is named `@meddleware/sui-indexer@<version>`.
       - name: Generate SBOM
         uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
@@ -148,14 +152,26 @@ jobs:
           output-file: sbom.spdx.json
           upload-artifact: false
 
-      - name: Attest SBOM (keyless)
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Generate the SBOM of the bundled npm dependencies
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm sbom --sbom-format spdx --omit dev > sbom.npm.spdx.json
+          node scripts/check-sbom.mjs sbom.npm.spdx.json
+
+      - name: Attest SBOMs (keyless)
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
           QUAY_NS: ${{ vars.QUAY_NAMESPACE || 'meddleware-org' }}
           DOCKERHUB_NS: ${{ vars.DOCKERHUB_NAMESPACE || 'meddleware' }}
         run: |
-          cosign attest --yes --type spdxjson --predicate sbom.spdx.json "quay.io/${QUAY_NS}/${IMAGE}@${DIGEST}"
-          cosign attest --yes --type spdxjson --predicate sbom.spdx.json "docker.io/${DOCKERHUB_NS}/${IMAGE}@${DIGEST}"
+          for sbom in sbom.spdx.json sbom.npm.spdx.json; do
+            cosign attest --yes --type spdxjson --predicate "$sbom" "quay.io/${QUAY_NS}/${IMAGE}@${DIGEST}"
+            cosign attest --yes --type spdxjson --predicate "$sbom" "docker.io/${DOCKERHUB_NS}/${IMAGE}@${DIGEST}"
+          done
 
       - name: Attest build provenance (quay.io)
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2

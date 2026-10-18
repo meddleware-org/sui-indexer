@@ -1,6 +1,6 @@
 # Security Audit — `sui-indexer`
 
-**Classification:** Internal security review (re-verified 2026-10-09 — awaiting external review)
+**Classification:** Internal security review (re-verified 2026-10-09; code gates closed 2026-10-18 — awaiting external review)
 **Project:** sui-indexer — a lean read-indexer for display data.
 
 - It polls two streams from a Sui full node over gRPC into SQLite (WAL):
@@ -57,11 +57,12 @@ cites them).
 - None of these can move funds or grant access.
 - Realised ceiling at this pass: **Low**.
 
-**Status:** re-verified 2026-10-09 against `v0.0.9`. Of F1–F14, 5 findings are RESOLVED, 4
-MITIGATED, 2 ADJUDICATED and the 3 Positives stand; F15–F21 were added (F15–F17 RESOLVED, F18–F19
-DEFERRED to the pre-mainnet gate, F20 ADJUDICATED, F21 ACCEPTED-RISK). Totals for F1–F21: 8 RESOLVED,
-4 MITIGATED, 3 ADJUDICATED, 1 ACCEPTED-RISK, 2 DEFERRED, 3 Positive. Nothing is open without a named gate. First pass:
-2026-10-03; there is no predecessor audit.
+**Status:** re-verified 2026-10-09 against `v0.0.9`; code gates closed 2026-10-18 in `0.0.10` (commit pending).
+Of F1–F14, 5 findings were RESOLVED, 4 MITIGATED, 2 ADJUDICATED and the 3 Positives stand; F15–F21 were
+added (F15–F17 RESOLVED, F18–F19 DEFERRED to the pre-mainnet gate, F20 ADJUDICATED, F21 ACCEPTED-RISK).
+2026-10-18: F18, F20 and F21 are RESOLVED in 0.0.10, and F4 follows F18 to RESOLVED. Totals for F1–F21:
+12 RESOLVED, 3 MITIGATED, 2 ADJUDICATED, 0 ACCEPTED-RISK, 1 DEFERRED (F19, a client change), 3 Positive.
+Nothing is open without a named gate. First pass: 2026-10-03; there is no predecessor audit.
 
 **Front matter (TS lens):**
 
@@ -114,7 +115,7 @@ The service is 1,136 lines in seven modules (816 lines in six at the first pass)
 | `chain` | maps the node's chain identifier to the short id |
 | `main` | wiring, startup refusals |
 
-There are 47 tests in four files (30 at the first pass).
+There are 52 tests in five files (30 at the first pass; 47 at 0.0.9).
 
 **Re-verification 2026-10-09 (code `a3369bb` = `v0.0.9`).** The first-pass findings were fixed in 0.0.5
 (2026-10-08) and the follow-up releases 0.0.6–0.0.9; the CHANGELOG lists them and each finding below
@@ -157,8 +158,8 @@ cites the commit and the test that pins it.
   - The published 0.0.9 image carries the lockfile, `package.json` and `THIRD_PARTY_LICENSES`
     (checked by unpacking the amd64 image from quay.io).
   - Keyless cosign signature, GitHub provenance attestation and a signed SPDX SBOM attestation are
-    present on the 0.0.9 index digest (OCI referrers on Docker Hub). The SBOM still lacks the bundled
-    npm packages (F18).
+    present on the 0.0.9 index digest (OCI referrers on Docker Hub). That SBOM lacks the bundled npm
+    packages (F18); from 0.0.10 the release also attests an SBOM of them.
 - **Measured (2026-10-09).**
   - 47/47 tests; tsc, eslint and `npm audit --audit-level=high` (0) clean;
   - `npm run build` succeeds (603 kB); `npm run check:licenses` passes (24 production packages).
@@ -170,11 +171,11 @@ cites the commit and the test that pins it.
 
 | Disposition | Findings |
 | --- | --- |
-| RESOLVED | F1 (full-stream scans), F5 (licence notices), F6 (cache key and limiter), F9 (casts, ETags), F10 (CI and image pipeline), and the new F15 (pruned-cursor wedge), F16 (chain-identity startup bug), F17 (libssl advisories in the base image) |
-| MITIGATED | F2 (stuck ingest; clients ignore `polledAt`, see F19), F3 (history loss on config change fixed; volume loss remains), F4 (lockfile shipped; SBOM still lacks the bundle, see F18), F11 (documentation drift, three residual items) |
-| ADJUDICATED | F7 (new event types need a fresh publish), F8 (display-only trust in the node; chain identity now checked), F20 (operator-keyed lookups fail closed) |
-| ACCEPTED-RISK | F21 (`noUncheckedIndexedAccess` off; two guarded sites) |
-| DEFERRED | F18 (SBOM from the lockfile) and F19 (clients treat a stale head page as unavailable): both pre-mainnet gate rows in Section D |
+| RESOLVED | F1 (full-stream scans), F4 and F18 (SBOM of the bundled npm packages, 0.0.10), F5 (licence notices), F6 (cache key and limiter), F9 (casts, ETags), F10 (CI and image pipeline), F15 (pruned-cursor wedge), F16 (chain-identity startup bug), F17 (libssl advisories in the base image), F20 (operator-keyed lookups use `Map`s, 0.0.10), F21 (`noUncheckedIndexedAccess` on, 0.0.10) |
+| MITIGATED | F2 (stuck ingest; clients ignore `polledAt`, see F19), F3 (history loss on config change fixed; volume loss remains), F11 (documentation drift, one residual item) |
+| ADJUDICATED | F7 (new event types need a fresh publish), F8 (display-only trust in the node; chain identity now checked) |
+| ACCEPTED-RISK | none |
+| DEFERRED | F19 (clients treat a stale head page as unavailable): pre-mainnet gate row in Section D; the change lives in access-gate-client and seal-client |
 | Positive | F12, F13, F14 |
 
 **Posture:**
@@ -182,8 +183,8 @@ cites the commit and the test that pins it.
 - Small, careful code. The correctness invariants (ordering, atomicity, generations) are sound and
   tested.
 - The operating-at-scale items (query cost, stuck ingest, destructive rebinding) are fixed in code and
-  pinned by tests. What remains is the **platform side** (volume backup, F3), **SBOM completeness**
-  (F18) and the **client side of freshness** (F19).
+  pinned by tests. What remains is the **platform side** (volume backup, F3) and the **client side of
+  freshness** (F19). SBOM completeness (F18) is fixed in the 0.0.10 release workflow.
 - The first pass recorded findings only; this pass records the dispositions of the fixes released
   2026-10-08/09 (see the re-verification log).
 
@@ -238,7 +239,7 @@ Critical / High / Medium / Low / Info / Positive.
 **In scope (HEAD `a3369bb` = tag `v0.0.9`; first pass `9aa3370` = `v0.0.4`):**
 
 - `src/{config,store,ingest,api,ratelimit,chain,main}.ts`
-- `tests/{api,chain,config,ingest}.test.ts`, `tests/fixtures.ts`
+- `tests/{api,chain,config,ingest,sbom}.test.ts`, `tests/fixtures.ts`
 - `package.json`, `package-lock.json`, `tsconfig.json`, `eslint.config.ts`, `vitest.config.ts`
 - `Dockerfile`, `.dockerignore`, `.gitignore`, `scripts/{smoke.sh,third-party-licenses.mjs}`
 - `README.md`, `CLAUDE.md`, `AGENTS.md`, `SECURITY.md`, `CHANGELOG.md`, `LICENSE`
@@ -274,7 +275,7 @@ configuration and the cluster platform (platform lens).
 | --- | --- |
 | `npm ci` | clean |
 | `npm run type-check` / `npm run lint` | clean / clean |
-| `npx vitest run` | **47 passed** (4 files) |
+| `npx vitest run` | **47 passed** (4 files) at 0.0.9; 52 passed (5 files) at 0.0.10, 2026-10-18 |
 | `npm audit --audit-level=high` | 0 vulnerabilities |
 | `npm run build` | `dist/main.mjs` 603.1 kB |
 | `npm run check:licenses` | 24 production packages; 4 without a licence file in the package (`@mysten/bcs`, `@mysten/seal`, `@mysten/utils`, `poseidon-lite`: the declared licence is recorded instead); `dist/THIRD_PARTY_LICENSES` contains the Apache-2.0 text |
@@ -495,7 +496,7 @@ then becomes hard to find, although the on-chain events remain where the node ke
 
 ### F4 — The image SBOM omits every bundled npm dependency
 
-**Severity:** Low   **Disposition:** MITIGATED (lockfile and licences shipped in 0.0.5, `1973fca`; the SBOM attestation still omits the bundle, F18)
+**Severity:** Low   **Disposition:** RESOLVED (lockfile and licences shipped in 0.0.5, `1973fca`; the SBOM of the bundle is F18, 0.0.10, commit pending)
 **Where:** `Dockerfile:12, 36` (esbuild bundle; only `main.mjs` reaches the runtime stage);
 `docker-publish.yml:229-244` (`anchore/sbom-action` scans the **image**).
 
@@ -538,6 +539,8 @@ finds JS packages through `package.json` and lockfiles, and a bundle has neither
   (`node_modules/*/package.json`), not a lockfile, so shipping the lockfile did not change the SBOM. The
   CHANGELOG and README imply that SBOM tools now see the bundle; for the published SBOM they do not.
   Tracked as F18. Whether Trivy's image scan reads the shipped lockfile was not verified here (no Trivy).
+- **Resolved 2026-10-18 (0.0.10, commit pending):** the release now attests a second SPDX SBOM generated
+  from the lockfile (F18).
 
 ### F5 — The bundle and image ship no third-party licence notices
 
@@ -798,7 +801,7 @@ the access-gate-client audit (exact-type matching at the original ID).
 
 ### F11 — Documentation drift
 
-**Severity:** Info   **Disposition:** MITIGATED (most items fixed; three residuals listed below)
+**Severity:** Info   **Disposition:** MITIGATED (most items fixed; one residual outside this repo, listed below)
 
 - CLAUDE.md "Strict input … stops cache-busting parameters" overstates it (F6).
 - README "About 110 MB RSS at 3.5k req/s on a laptop" should state the database size (F1).
@@ -818,11 +821,15 @@ the access-gate-client audit (exact-type matching at the original ID).
   that a package change refuses to start until `REINDEX_CONFIRM` is set and that the pruned history
   cannot be recovered (F3).
 - Residual 1: README still says "About 110 MB RSS at 3.5k req/s on a laptop" without the database size.
+  Fixed 2026-10-18 (0.0.10): the README now labels it a one-off measurement against a small database, not a
+  benchmark (the original database size was not recorded, so none is stated).
 - Residual 2: README's `GRPC_URL` row says "https required"; `localhost` and `127.0.0.1` over http are also
-  accepted (`config.ts`).
+  accepted (`config.ts`). Fixed 2026-10-18 (0.0.10).
 - Residual 3: the CHANGELOG keeps released items (CI gate, `.dockerignore`, the new-event-type note) under
   `[Unreleased]` although they shipped in 0.0.7–0.0.9, and the infrastructure PVC comment and README
-  ("rebuildable from the chain") do not mention the node's 5½-day retention (F3).
+  ("rebuildable from the chain") do not mention the node's 5½-day retention (F3). The CHANGELOG half is
+  fixed 2026-10-18 (the items now sit under 0.0.7); the infrastructure wording is outside this repo and
+  stays open (one residual item).
 
 ### F12 — Positive: ingest ordering, atomicity and generation semantics are sound
 
@@ -967,7 +974,7 @@ steps.
 
 ### F18 — The signed SBOM still omits the bundled npm packages
 
-**Severity:** Low   **Disposition:** DEFERRED (pre-mainnet gate: *SBOM includes the bundled dependencies*, Section D; IMG-M8)
+**Severity:** Low   **Disposition:** RESOLVED (0.0.10, commit pending; verify the new attestation on the 0.0.10 digest after the release)
 **Where:** `.github/workflows/docker-publish.yml` ("Generate SBOM": `anchore/sbom-action` with `image:`);
 `Dockerfile` (lockfile copied to `/app`).
 
@@ -983,10 +990,20 @@ steps.
 `@mysten/sui`, `@noble/*` or `@protobuf-ts/*`. `npm audit` in CI and Dependabot cover the lockfile at
 build time; the Trivy image scan may read the shipped lockfile (not verified).
 
-**Remediation / evidence (code change, not made in this pass):** generate the SPDX document from the source
-tree (`syft dir:.` or `npm sbom --sbom-format spdx --omit dev`) and attest that (or merge it with the image
-SBOM) before `cosign attest`; or run the scan against a `node_modules` layout. Deferred to the pre-mainnet
-gate; the image is testnet-only and display-only.
+**Remediation / evidence (2026-10-18, 0.0.10, commit pending):**
+
+- `docker-publish.yml` now installs the lockfile (`npm ci --ignore-scripts`), writes the production
+  dependency tree with `npm sbom --sbom-format spdx --omit dev` (23 packages plus the root, from the
+  lockfile) and attests it with cosign next to the image SBOM, to both registries. Two SPDX attestations
+  per digest, because syft's image scan cannot be made to see a bundle; `cosign verify-attestation --type
+  spdxjson` returns both (README → SBOMs).
+- `scripts/check-sbom.mjs` fails the step unless the SBOM lists every production package of
+  `package-lock.json` at its locked version (a root dev dependency that is only an uninstalled peer is not
+  expected). `node-ci.yml` runs the same generation and check, so it also gates the release (`verify`).
+  Test: `tests/sbom.test.ts` (complete, a package missing, a version mismatch, an empty SBOM).
+- Not run here: the publish workflow itself (needs the tag and registry credentials) and `cosign`; the
+  commands were run locally (`npm sbom` and the check pass). The first attested npm SBOM is a post-release
+  check on the 0.0.10 digest (referrers).
 
 ### F19 — The clients do not use the freshness fields the indexer now serves
 
@@ -1008,9 +1025,14 @@ outage visible to the operator, not to the apps. No funds or access are affected
 treat a head page whose `polledAt` is older than N poll intervals as unavailable and fall back to the node;
 add a test per client. Deferred to the pre-mainnet gate; not a testnet blocker.
 
+**Note (2026-10-18):** the change lives only in access-gate-client and seal-client (`readIndexerEvents`);
+this repo already serves `polledAt` and `latestCheckpoint` and its contract tests pin them. Nothing to change
+here, so the finding stays DEFERRED on those two repos. The two clients' choice of N (a multiple of the poll
+interval, 15 s by default) is theirs to make; recommendation: 4 intervals (60 s).
+
 ### F20 — Operator-keyed lookups use plain objects (found by the TS lens *Caller-keyed lookups* check)
 
-**Severity:** Info   **Disposition:** ADJUDICATED (operator-supplied `NETWORK`; every prototype key fails closed)
+**Severity:** Info   **Disposition:** RESOLVED (0.0.10, commit pending; adjudicated hygiene, now fixed)
 **Where:** `src/config.ts` (`DEFAULT_GRPC[network]`), `src/main.ts` (`KNOWN_CHAIN_IDS[config.network]`).
 
 **Issue / adjudication:**
@@ -1024,10 +1046,16 @@ add a test per client. Deferred to the pre-mainnet gate; not a testnet blocker.
 - If the code is touched again, use `Object.hasOwn(DEFAULT_GRPC, network)` and a `Map` for the chain ids.
 - Re-verified 2026-10-09 at `a3369bb`: unchanged (`config.ts:24,64`, `main.ts:31`; `chain.ts` types the map
   `Readonly<Record<string, string>>`). No code change was made in this alignment pass.
+- **Fixed 2026-10-18 (0.0.10, commit pending):** `DEFAULT_GRPC` (`config.ts`) and `KNOWN_CHAIN_IDS`
+  (`chain.ts`) are `Map`s read with `.get`, so an inherited name is simply unknown (`constructor` without
+  `GRPC_URL` is `GRPC_URL is required for network constructor`; with it, the clients' deployment lookup
+  rejects it). Tests: `config.test.ts` (*treats NETWORK as data*), `chain.test.ts` (*has no inherited
+  entries*). No other caller-keyed plain-object lookup exists in `src/`: the stats `counts` object is keyed
+  by kinds this process wrote from the client parsers, and `state[stream]` is keyed by the `Stream` union.
 
 ### F21 — `noUncheckedIndexedAccess` is off (found by the TS lens *Compiler strictness* check, 2026-10-09)
 
-**Severity:** Info   **Disposition:** ACCEPTED-RISK (two guarded sites in `src/`; revisit when the code is next touched)
+**Severity:** Info   **Disposition:** RESOLVED (0.0.10, commit pending)
 **Where:** `tsconfig.json` (`strict: true`, no `noUncheckedIndexedAccess`, `skipLibCheck: true`);
 `src/api.ts:251`, `src/store.ts:316`.
 
@@ -1053,6 +1081,16 @@ without a guard.
 (a small change; not made in this pass, which makes no code changes). Accepted for testnet because the
 service is display-only and the two sites are guarded.
 
+**Resolution (2026-10-18, 0.0.10, commit pending):** `noUncheckedIndexedAccess` is on in `tsconfig.json`
+(`src` and `tests`); `tsc --noEmit` is clean.
+
+- `api.ts` (gate stats route): `parseId(parts[3] ?? null, 'gate id')` and a `400` if it is absent, instead of
+  a non-null assertion.
+- `store.ts` (`page`): `next` is `page.at(-1)?.id ?? null` when there is a further page.
+- Tests: the ETag header is narrowed with a thrown error, the ingest mock call and stored row are checked
+  rather than asserted, and the shared `pages` object no longer relies on a computed string key.
+  No test or rule was weakened. The flag now guards the type-check in CI and the release gate.
+
 ---
 
 ## Section A — Invariant verification matrix
@@ -1069,12 +1107,12 @@ service is display-only and the two sites are guarded.
 | A8 | Cheap under load | counters; cache headers; limiter | *Store counters* (50k-row constant-time read) | HOLDS (F1) |
 | A9 | Ingest progresses despite a bad event; one stream cannot stall the other; a pruned cursor recovers | `Ingestor.pollOne` | resilience tests | HOLDS (F2, F15) |
 | A10 | Full-node calls bounded in time | `AbortSignal.timeout` | test + SDK source | HOLDS |
-| A11 | Image SBOM covers what runs | publish workflow | registry SBOM (0.0.9) | **GAP** — F18 |
+| A11 | Image SBOM covers what runs | publish workflow (image SBOM + `npm sbom --omit dev` attestation) | `scripts/check-sbom.mjs`, `tests/sbom.test.ts`, CI step | HOLDS from 0.0.10 (F18; the 0.0.9 registry SBOM did not) |
 | A12 | Licence obligations met in the image | `THIRD_PARTY_LICENSES`, CI check | published image unpacked | HOLDS (F5) |
 | A13 | Least privilege at runtime | Dockerfile; manifest | manifest read 2026-10-09; image config | HOLDS (non-root, read-only root FS, caps dropped, seccomp, no SA token, NetworkPolicy) |
 | A14 | The node serves the configured network | `chain.ts`, `main.ts` | `chain.test.ts`; live start | HOLDS (F8, F16); startup path not run in CI |
-| A15 | Operator-keyed lookups cannot resolve prototype members | `config.ts`, `main.ts` | reasoning | HOLDS by failing closed (F20, hygiene) |
-| A16 | TS — compiler strictness: `strict: true`; `noUncheckedIndexedAccess` state recorded; `skipLibCheck` does not hide own-source errors | `tsconfig.json` | `tsc --noEmit` clean; flag measured (2 `src/` errors) | PARTIAL — flag off, two guarded sites (F21) |
+| A15 | Operator-keyed lookups cannot resolve prototype members | `config.ts`, `chain.ts`, `main.ts` (`Map`s) | `config.test.ts`, `chain.test.ts` | HOLDS (F20, 0.0.10) |
+| A16 | TS — compiler strictness: `strict: true`; `noUncheckedIndexedAccess` state recorded; `skipLibCheck` does not hide own-source errors | `tsconfig.json` | `tsc --noEmit` clean with the flag on (0.0.10) | HOLDS (F21) |
 | A17 | TS — assertions at trust boundaries: casts justified; no `any`, no `eslint-disable` | `src/*.ts` | grep; F9 | HOLDS (SQLite row casts on self-written data; `config.network as 'testnet'` bound by the chain check, F9) |
 | A18 | TS — untrusted data validated: request size and shape; node events through the client parsers; fields copied into fresh literals | `api.ts` (`onlyParams`, `parseId`, `parseLimit`, `parseBefore`), `ingest.ts` (`toIndexed`) | api and ingest tests; F13 | HOLDS (HTTP bodies are never read: GET/HEAD/OPTIONS only) |
 | A19 | TS — money and integer math: commission as `bigint`; checkpoint kept as string | `store.ts` (`setReadBigInts`, `gate_commission` text) | *Store counters*; commission > 2^53 test | HOLDS |
@@ -1103,15 +1141,16 @@ service is display-only and the two sites are guarded.
 
 ### B.1 Dependency & CVE risk
 
-`npm audit --audit-level=high`: 0 (2026-10-09). The CI Trivy image gate (fixable CRITICAL/HIGH) runs on
-every build and on the published image before signing; a local Trivy run was not possible here. The
-signed SBOM does not list the bundled JavaScript (F18).
+`npm audit --audit-level=high`: 0 (2026-10-09, again 2026-10-18). The CI Trivy image gate (fixable
+CRITICAL/HIGH) runs on every build and on the published image before signing; a local Trivy run was not
+possible here. The image SBOM does not list the bundled JavaScript; from 0.0.10 a second attested SBOM does
+(F18).
 
 | Dependency | Range (installed) | Liveness dependency? | Status | Notes |
 | --- | --- | --- | --- | --- |
 | `@mysten/sui` | `^2.33.2` (2.35.0) | gRPC, BCS, address normalisation | clean | one copy across the clients; baseline `^2.33.1` (ADR-0001) |
-| `@meddleware/access-gate-client` | `^0.0.8` (0.0.8) | event parsing, deployments | clean | pre-v0.2: `^0.0.8` = exact; the latest published |
-| `@meddleware/seal-client` | `^0.0.19` (0.0.19) | sealed-content parsing, deployments | clean | the latest published; brings `@mysten/seal` 1.4.19 (bundled only if reachable) |
+| `@meddleware/access-gate-client` | `^0.0.9` (0.0.9) | event parsing, deployments | clean | pre-v0.2: `^0.0.9` = exact; the latest published (2026-10-18) |
+| `@meddleware/seal-client` | `^0.0.20` (0.0.20) | sealed-content parsing, deployments | clean | the latest published; brings `@mysten/seal` 1.4.19 (bundled only if reachable) |
 | Base images | builder `node:24-trixie-slim@8ec5d755…`; runtime `distroless/nodejs24-debian13:nonroot@9eeb7f58…` (Node 24.21.0) | runtime | scanned by the CI Trivy gate | digest-pinned; Dependabot (docker, weekly, grouped) proposes bumps |
 
 **TS lens shared-dependency matrix row (this repo):**
@@ -1125,7 +1164,7 @@ signed SBOM does not list the bundled JavaScript (F18).
 | `typescript` | — | `~6.0.3` | — |
 | `vitest` | — | `~5.0.2` | — |
 
-First-party ranges are `^0.0.8` and `^0.0.19`, which resolve to exactly the latest published versions, as
+First-party ranges are `^0.0.9` and `^0.0.20` (2026-10-18), which resolve to exactly the latest published versions, as
 the versioning policy intends. This repo is not published to npm (`private: true`), so TS-M9 (peers) does
 not apply; there is one copy of `@mysten/sui` in the bundle (`npm ls`). Dependabot: weekly, grouped
 (`npm-minor-patch`, `docker`, `github-actions`); the 2026-10-09 triage declined the Node 25 / TypeScript 7 /
@@ -1150,7 +1189,7 @@ vitest 5 majors per the workspace decisions.
 | Release runs the full CI on the tagged commit | Yes | `verify: uses: ./.github/workflows/node-ci.yml` (`ef68727`) |
 | Image scan before sign (published image) | Yes | `docker-publish.yml` "Scan the published image" |
 | Signature + SBOM + provenance, no `continue-on-error` on public registries | Yes | B.IMG-1 |
-| SBOM covers the bundled code | No | F18 |
+| SBOM covers the bundled code | Yes, from 0.0.10 | F18 (`npm sbom --omit dev` attestation, checked by `scripts/check-sbom.mjs` in CI and the release) |
 | Config scan / container smoke test | Yes | `node-ci.yml` `image` job; `scripts/smoke.sh` |
 | actionlint | No | not run here (sibling repos run it) |
 | Dependabot | Yes | `.github/dependabot.yml` (npm, docker, github-actions; weekly, grouped) |
@@ -1180,7 +1219,7 @@ audit in the workflow); audit at `high`, no allowlist. No npm publish.
 
 | Registry | Signature | SBOM attestation | Provenance | Notes |
 | --- | --- | --- | --- | --- |
-| Docker Hub | cosign keyless (referrer) | SPDX via cosign (referrer; annotation mislabelled — F10; content lacks the bundle — F18) | BuildKit SLSA (in-index) + GitHub attestation (referrer) | verified 2026-10-09 on `sha256:aea58153…1704` (referrers listed; signature identity not re-run) |
+| Docker Hub | cosign keyless (referrer) | SPDX via cosign (referrer; annotation mislabelled — F10; content of the 0.0.9 attestation lacks the bundle; 0.0.10 adds a second, npm-only SBOM attestation — F18) | BuildKit SLSA (in-index) + GitHub attestation (referrer) | verified 2026-10-09 on `sha256:aea58153…1704` (referrers listed; signature identity not re-run) |
 | quay.io | per workflow | per workflow | per workflow | index digest equals Docker Hub's (2026-10-09, `skopeo`); referrers not listed |
 | Self-hosted | none | none | BuildKit only | best-effort mirror |
 
@@ -1227,7 +1266,7 @@ N/A (single implementation). The clients and the indexer share `readIndexerEvent
 
 ## Section C — Test-coverage & hermetic/live split
 
-### C.1 Coverage grade — A- (47/47; coverage not re-measured; `main.ts` still untested)
+### C.1 Coverage grade — A- (52/52 at 0.0.10; coverage not re-measured; `main.ts` still untested)
 
 | Dimension | Assessment |
 | --- | --- |
@@ -1244,7 +1283,7 @@ from B because the first-pass error-path and boundary gaps (F1, F2, F6) are clos
 
 | Layer | Files | In CI? |
 | --- | --- | --- |
-| Unit / handler | `tests/{api,chain,config,ingest}.test.ts` (47: api 19, ingest 22, config 4, chain 2) | yes (`node-ci.yml` `check`, reused by the release) |
+| Unit / handler | `tests/{api,chain,config,ingest}.test.ts` (52: api 19, ingest 22, config 5, chain 3, sbom 3) | yes (`node-ci.yml` `check`, reused by the release) |
 | Local run against testnet | README → Development (manual, before a release) | no |
 | Image smoke test | `scripts/smoke.sh` (non-root, `/readyz`, headers, `/healthz` 503) | yes (`node-ci.yml` `image`) |
 | Config and image scans | Trivy config scan, Trivy image scan | yes (CI, and on the published image before signing) |
@@ -1273,7 +1312,7 @@ Every test project that exists runs in CI (there is one vitest project, `environ
 - [x] strict API; atomic ingest; generations — F12, F13
 - [x] `.dockerignore` covers `.env*` and `*.db*` — F10 (`ef68727`, released 0.0.7)
 - [x] strict type-check green; no swallowed promises on security paths; untrusted parsers validate every
-  field — A16–A20 (`noUncheckedIndexedAccess` off: F21, accepted)
+  field — A16–A20 (`noUncheckedIndexedAccess` on since 0.0.10: F21)
 
 ### pre-testnet *(live on testnet since 2026-10-03; all items now met)*
 
@@ -1292,19 +1331,20 @@ Every test project that exists runs in CI (there is one vitest project, `environ
   client records — B.SC-1; Deployment status
 - [x] `SECURITY.md` present — Scope
 - [x] lockfile committed; signature, SBOM and provenance on the image; CI gates green — B.IMG-1, B.2
-  (the SBOM content gap is F18, below)
+  (the SBOM content gap was F18, closed in 0.0.10)
 - [x] third-party licence notices in the image — F5
 
 ### pre-mainnet
 
-- [ ] SBOM includes the bundled dependencies (IMG-M8) — F18; code change in the publish workflow, gated on
-  mainnet
+- [x] SBOM includes the bundled dependencies (IMG-M8) — F18 (0.0.10, commit pending): second SPDX
+  attestation from `npm sbom --omit dev`, checked by `scripts/check-sbom.mjs` and `tests/sbom.test.ts`;
+  confirm the referrer on the 0.0.10 digest after the release
 - [ ] clients treat a stale head page as unavailable — F19; coordinated client change, gated on mainnet
 - [ ] a mainnet deployment recorded in both clients (startup otherwise throws by design); then
   `NETWORK=mainnet` with the recorded chain id `35834a8a` — mainnet-blocked (access-gate-sui and
   seal-policies-sui publication, `OPERATOR_TASKS.md` "Mainnet release custody")
-- [ ] `noUncheckedIndexedAccess` enabled (F21) and the `Object.hasOwn` hygiene (F20) — optional, when the code
-  is next touched
+- [x] `noUncheckedIndexedAccess` enabled (F21) and the `Object.hasOwn` hygiene (F20) — 0.0.10, commit
+  pending: flag on, `tsc` clean; `Map` lookups with tests
 - [ ] volume snapshot or backup policy for `sui-indexer-data` (F3) — maintainer item; no `OPERATOR_TASKS.md`
   row yet
 - [ ] Cloudflare zone rate-limit rule (F6) — maintainer item (free plan)
@@ -1330,7 +1370,8 @@ Every test project that exists runs in CI (there is one vitest project, `environ
 - **Bundled images hide their dependencies.** F4 and F5 apply to every esbuild- or Vite-bundled
   image in the workspace (the static-server UIs ship bundles too). The licence-file half is solved here
   (`scripts/third-party-licenses.mjs`, F5), as in the other web images. The SBOM-from-lockfile half is not
-  (F18); it is a workspace pattern to fix once in the publish workflow.
+  (F18) was open at 0.0.9; here it is fixed in 0.0.10 by a second SBOM attestation from the lockfile
+  (`npm sbom --omit dev` + `scripts/check-sbom.mjs`), a pattern the sibling bundled images can copy.
 - **Chain-access layering.** The indexer is a consumer of the domain clients (ADR-0001): it decodes
   nothing itself and holds no package IDs of its own; a republication reaches it through the clients'
   deployment records and a confirmed rebind (F3, F7; exercised on 2026-10-09).
@@ -1349,7 +1390,7 @@ Every test project that exists runs in CI (there is one vitest project, `environ
 3. MUST NOT irreversibly delete indexed history on a configuration change without explicit
    confirmation or an archive — **holds** (F3: confirmation plus a backup on the same volume; volume loss
    is outside it).
-4. MUST attach an SBOM that covers the bundled runtime code — **does not hold** (F18); MUST ship its
+4. MUST attach an SBOM that covers the bundled runtime code — **holds from 0.0.10** (F18); MUST ship its
    licence notices — **holds** (F4, F5).
 5. MUST map equivalent requests to one cache key — **holds** (F6).
 
@@ -1357,7 +1398,7 @@ Every test project that exists runs in CI (there is one vitest project, `environ
 
 | ID | Holds? | Evidence |
 | --- | --- | --- |
-| TS-M1 | yes (`strict`; casts only on self-written rows and one network-union cast; `noUncheckedIndexedAccess` off, two guarded sites) | F9, F21 |
+| TS-M1 | yes (`strict`; casts only on self-written rows and one network-union cast; `noUncheckedIndexedAccess` on since 0.0.10) | F9, F21 |
 | TS-M2 | yes (strict request validation; client parsers for node data; canonical URLs) | F13, F6 |
 | TS-M3 | yes (`commissionMist` as `bigint`) | F13 |
 | TS-M4 | yes (poll errors recorded per stream; one stream's failure no longer skips the other) | F2 |
@@ -1390,7 +1431,7 @@ Every test project that exists runs in CI (there is one vitest project, `environ
 | IMG-M5 | yes (image 65532; pod context read from the manifest 2026-10-09) | B.IMG-2 |
 | IMG-M6 | yes (digest from `config/images.yaml`; 16/16 images cosign-verified 2026-10-09) | B.IMG-2, B.IMG-1 |
 | IMG-M7 | yes (signature, SBOM attestation and provenance present on Docker Hub; the private mirror is best-effort) | F10, B.IMG-1 |
-| IMG-M8 | partial (scan before sign, licence notices and identity-pinned verification: yes; the SBOM misses the bundle) | F10, F5, F18 |
+| IMG-M8 | yes from 0.0.10 (scan before sign, licence notices, identity-pinned verification; the bundle is listed in a second attested SBOM); confirm on the first published digest | F10, F5, F18 |
 
 ## Implementation suggestions (SHOULD / MAY)
 
@@ -1404,9 +1445,9 @@ Every test project that exists runs in CI (there is one vitest project, `environ
   can be restored into a fresh volume (F3). Not built; the volume backup is a maintainer item.
 - **S5** MAY sample-verify new rows against a second full node, and expose a `verified` ratio in
   `/coverage` (F8). Not built; display-only by design.
-- **S6** SHOULD generate the SPDX SBOM from the source tree and attest that (F18).
+- **S6** SHOULD generate the SPDX SBOM from the source tree and attest that (F18) — done in 0.0.10.
 - **S7** SHOULD enable `noUncheckedIndexedAccess` and use `Object.hasOwn` / `Map` for operator-keyed lookups
-  (F20, F21).
+  (F20, F21) — done in 0.0.10.
 
 ## Open questions (`OQ#`)
 
@@ -1429,14 +1470,29 @@ All four first-pass questions are decided; none remains open.
   the same volume (F3).
 - **Growth:** fixed in code (counters, canonical URLs); the Cloudflare zone rate rule is not set (F1,
   F6).
-- **Supply-chain blind spot:** vulnerabilities in bundled dependencies stay invisible to the signed SBOM
-  (F18); `npm audit`, Dependabot and the Trivy gate cover the lockfile and the base image (F4, F17).
+- **Supply-chain blind spot:** closed in 0.0.10: the bundled dependencies are in an attested SBOM (F18);
+  `npm audit`, Dependabot and the Trivy gate cover the lockfile and the base image (F4, F17).
 - **Upstream node trust:** a compromised full node can inject display rows (F8, display-only).
 
 ---
 
 ## Re-verification log
 
+- 2026-10-18 — code gates closed in `0.0.10` (commit pending), on top of `d1910e0`.
+  - **Fixed:** F18 (and F4): the release attests a second SPDX SBOM from `npm sbom --omit dev`, checked by
+    `scripts/check-sbom.mjs` (CI `check` job and the release). F20: `Map` lookups for `NETWORK`. F21:
+    `noUncheckedIndexedAccess` on, two `src/` and five test sites fixed. F11 residuals 1, 2 and the
+    CHANGELOG part of 3.
+  - **Dependencies:** `@meddleware/access-gate-client` ^0.0.9 and `@meddleware/seal-client` ^0.0.20 (the
+    latest published); the bundle builds (603 kB) and the client-contract tests pass against them.
+  - **Measured (local, Node 24.13.0):** 52/52 tests (api 19, ingest 22, config 5, chain 3, sbom 3); tsc
+    (with the flag), eslint, `npm audit --audit-level=high` (0), `npm run build`, `check:licenses` and the
+    SBOM check (23 production packages) all pass. `list-open-gates` for this repo: only mainnet and
+    maintainer items remain, plus F19.
+  - **Left open:** F19 (the change is in access-gate-client and seal-client; see the note on F19), F3 volume
+    backup and the Cloudflare zone rule (maintainer items), the mainnet deployment record, external review.
+  - **Not run:** the publish workflow, `cosign`, Trivy, `actionlint`, the container smoke test (no daemon
+    access here; GitHub Actions runs them).
 - 2026-10-09 — re-verification against `a3369bb` (tag `v0.0.9`; image `sha256:aea58153…1704`).
   - **Lenses:** AUDIT_TEMPLATE.md + TS + SUI_CLIENT + IMG at 2026-10-08. OPS, PLATFORM, PROXY, AUTH and the
     rest re-checked against the registry and still not triggered (no signing or chain-writing scripts; no
@@ -1483,12 +1539,12 @@ All four first-pass questions are decided; none remains open.
 
 ## Pre-save consistency checklist (this pass)
 
-- [x] Section A ↔ findings: GAP row A11 (F18); PARTIAL A16 (F21); A6 caveat (F3, backup on the same
+- [x] Section A ↔ findings: A11 and A16 now HOLD (F18, F21; 2026-10-18); A6 caveat (F3, backup on the same
   volume); A1 caveat (F19).
 - [x] Finding header ↔ body: consistent (F1–F21).
 - [x] Template line: base + TS + SUI_CLIENT + IMG with registry dates; untriggered lenses named.
 - [x] Closing four-part structure present (normative, suggestions, open questions, risks).
 - [x] Section D ↔ dispositions: every unticked item names a gate or a maintainer item.
-- [x] Executive summary ↔ dispositions and ceiling (Medium; realised Low); totals F1–F21 checked.
-- [x] C.1 counts measured 2026-10-09 (47 tests).
-- [x] Re-verification log entry added (2026-10-09).
+- [x] Executive summary ↔ dispositions and ceiling (Medium; realised Low); totals F1–F21 checked (2026-10-18: 12 / 3 / 2 / 0 / 1 / 3).
+- [x] C.1 counts measured 2026-10-18 (52 tests).
+- [x] Re-verification log entry added (2026-10-09, 2026-10-18).

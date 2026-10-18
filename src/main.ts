@@ -28,7 +28,7 @@ if (cleared.length > 0) log(`package changed for ${cleared.join(', ')}: backed u
 const client = new SuiGrpcClient({ network: config.network as 'testnet', baseUrl: config.grpcUrl })
 // The node must serve the network this instance is configured for: a mainnet node behind a testnet
 // instance would index nothing and stay green.
-const want = KNOWN_CHAIN_IDS[config.network]
+const want = KNOWN_CHAIN_IDS.get(config.network)
 if (want) {
   const { chainIdentifier } = await client.core.getChainIdentifier()
   const got = shortChainId(chainIdentifier)

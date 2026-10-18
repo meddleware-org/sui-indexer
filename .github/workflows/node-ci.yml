@@ -42,6 +42,12 @@ jobs:
       - name: Third-party licence notices
         run: npm run check:licenses && test -s dist/THIRD_PARTY_LICENSES && grep -q 'Apache License' dist/THIRD_PARTY_LICENSES
 
+      # The image SBOM cannot see the bundled npm packages (one esbuild bundle); the release attests this one.
+      - name: SBOM lists every bundled production dependency
+        run: |
+          npm sbom --sbom-format spdx --omit dev > dist/sbom.npm.spdx.json
+          node scripts/check-sbom.mjs dist/sbom.npm.spdx.json
+
   image:
     name: Image (configuration scan, build, scan, smoke test)
     runs-on: ubuntu-latest

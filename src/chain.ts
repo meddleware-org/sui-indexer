@@ -1,7 +1,12 @@
 import { fromBase58 } from '@mysten/sui/utils'
 
 /** The short chain ids used in Move/Published.toml and wallets: the first four bytes of the genesis digest, hex. */
-export const KNOWN_CHAIN_IDS: Readonly<Record<string, string>> = { testnet: '4c78adac', mainnet: '35834a8a' }
+// A Map, not a plain object: the key is the operator's `NETWORK` string, and `KNOWN_CHAIN_IDS['constructor']`
+// would resolve to an inherited function.
+export const KNOWN_CHAIN_IDS: ReadonlyMap<string, string> = new Map([
+  ['testnet', '4c78adac'],
+  ['mainnet', '35834a8a'],
+])
 
 /**
  * The short chain id of a node's `getChainIdentifier()` result. The node reports the full base58

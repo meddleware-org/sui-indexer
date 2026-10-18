@@ -313,7 +313,7 @@ export class Store {
       transactionDigest: r.tx_digest,
       eventIndex: r.event_index,
     }))
-    return { rows: page, next: more ? page[page.length - 1].id : null }
+    return { rows: page, next: more ? (page.at(-1)?.id ?? null) : null }
   }
 
   /** The id of the newest row in `stream` (0 when empty) — part of the head page's ETag. */

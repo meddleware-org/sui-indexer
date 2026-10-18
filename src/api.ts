@@ -248,7 +248,8 @@ function route(ctx: ApiContext, req: ApiRequest, url: URL): ApiResponse {
 
   if (parts.length === 5 && parts[2] === 'gates' && parts[4] === 'stats') {
     onlyParams(q, [])
-    const gateId = parseId(parts[3], 'gate id')!
+    const gateId = parseId(parts[3] ?? null, 'gate id')
+    if (!gateId) throw new HttpError(400, 'gate id is required')
     const { counts, commissionMist } = ctx.store.gateStats(gateId)
     return json(
       200,

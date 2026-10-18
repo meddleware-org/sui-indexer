@@ -42,7 +42,9 @@ describe('events pages', () => {
     expect(b.events.map((e: { checkpoint: string }) => e.checkpoint)).toEqual(['5', '4'])
     expect(b.cursor).toMatch(/^[0-9a-f]{12}\.\d+$/)
     expect(b.indexedFromCheckpoint).toBe('1')
-    expect(get('/v1/testnet/access-gate/events?limit=2', { 'if-none-match': r.headers.ETag }).status).toBe(304)
+    const etag = r.headers.ETag
+    if (typeof etag !== 'string') throw new Error('the newest page must carry an ETag')
+    expect(get('/v1/testnet/access-gate/events?limit=2', { 'if-none-match': etag }).status).toBe(304)
   })
 
   it('serves older pages as immutable and ends with a null cursor', () => {
