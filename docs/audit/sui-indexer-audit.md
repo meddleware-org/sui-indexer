@@ -57,7 +57,7 @@ cites them).
 - None of these can move funds or grant access.
 - Realised ceiling at this pass: **Low**.
 
-**Status:** re-verified 2026-10-09 against `v0.0.9`; code gates closed 2026-10-18 in `0.0.10` (commit pending).
+**Status:** re-verified 2026-10-09 against `v0.0.9`; code gates closed 2026-10-18 in `0.0.10` (commit `4aab344`).
 Of F1–F14, 5 findings were RESOLVED, 4 MITIGATED, 2 ADJUDICATED and the 3 Positives stand; F15–F21 were
 added (F15–F17 RESOLVED, F18–F19 DEFERRED to the pre-mainnet gate, F20 ADJUDICATED, F21 ACCEPTED-RISK).
 2026-10-18: F18, F20 and F21 are RESOLVED in 0.0.10, and F4 follows F18 to RESOLVED. Totals for F1–F21:
@@ -496,7 +496,7 @@ then becomes hard to find, although the on-chain events remain where the node ke
 
 ### F4 — The image SBOM omits every bundled npm dependency
 
-**Severity:** Low   **Disposition:** RESOLVED (lockfile and licences shipped in 0.0.5, `1973fca`; the SBOM of the bundle is F18, 0.0.10, commit pending)
+**Severity:** Low   **Disposition:** RESOLVED (lockfile and licences shipped in 0.0.5, `1973fca`; the SBOM of the bundle is F18, 0.0.10, commit `4aab344`)
 **Where:** `Dockerfile:12, 36` (esbuild bundle; only `main.mjs` reaches the runtime stage);
 `docker-publish.yml:229-244` (`anchore/sbom-action` scans the **image**).
 
@@ -539,7 +539,7 @@ finds JS packages through `package.json` and lockfiles, and a bundle has neither
   (`node_modules/*/package.json`), not a lockfile, so shipping the lockfile did not change the SBOM. The
   CHANGELOG and README imply that SBOM tools now see the bundle; for the published SBOM they do not.
   Tracked as F18. Whether Trivy's image scan reads the shipped lockfile was not verified here (no Trivy).
-- **Resolved 2026-10-18 (0.0.10, commit pending):** the release now attests a second SPDX SBOM generated
+- **Resolved 2026-10-18 (0.0.10, commit `4aab344`):** the release now attests a second SPDX SBOM generated
   from the lockfile (F18).
 
 ### F5 — The bundle and image ship no third-party licence notices
@@ -974,7 +974,7 @@ steps.
 
 ### F18 — The signed SBOM still omits the bundled npm packages
 
-**Severity:** Low   **Disposition:** RESOLVED (0.0.10, commit pending; verify the new attestation on the 0.0.10 digest after the release)
+**Severity:** Low   **Disposition:** RESOLVED (0.0.10, commit `4aab344`; verify the new attestation on the 0.0.10 digest after the release)
 **Where:** `.github/workflows/docker-publish.yml` ("Generate SBOM": `anchore/sbom-action` with `image:`);
 `Dockerfile` (lockfile copied to `/app`).
 
@@ -990,7 +990,7 @@ steps.
 `@mysten/sui`, `@noble/*` or `@protobuf-ts/*`. `npm audit` in CI and Dependabot cover the lockfile at
 build time; the Trivy image scan may read the shipped lockfile (not verified).
 
-**Remediation / evidence (2026-10-18, 0.0.10, commit pending):**
+**Remediation / evidence (2026-10-18, 0.0.10, commit `4aab344`):**
 
 - `docker-publish.yml` now installs the lockfile (`npm ci --ignore-scripts`), writes the production
   dependency tree with `npm sbom --sbom-format spdx --omit dev` (23 packages plus the root, from the
@@ -1032,7 +1032,7 @@ interval, 15 s by default) is theirs to make; recommendation: 4 intervals (60 s)
 
 ### F20 — Operator-keyed lookups use plain objects (found by the TS lens *Caller-keyed lookups* check)
 
-**Severity:** Info   **Disposition:** RESOLVED (0.0.10, commit pending; adjudicated hygiene, now fixed)
+**Severity:** Info   **Disposition:** RESOLVED (0.0.10, commit `4aab344`; adjudicated hygiene, now fixed)
 **Where:** `src/config.ts` (`DEFAULT_GRPC[network]`), `src/main.ts` (`KNOWN_CHAIN_IDS[config.network]`).
 
 **Issue / adjudication:**
@@ -1046,7 +1046,7 @@ interval, 15 s by default) is theirs to make; recommendation: 4 intervals (60 s)
 - If the code is touched again, use `Object.hasOwn(DEFAULT_GRPC, network)` and a `Map` for the chain ids.
 - Re-verified 2026-10-09 at `a3369bb`: unchanged (`config.ts:24,64`, `main.ts:31`; `chain.ts` types the map
   `Readonly<Record<string, string>>`). No code change was made in this alignment pass.
-- **Fixed 2026-10-18 (0.0.10, commit pending):** `DEFAULT_GRPC` (`config.ts`) and `KNOWN_CHAIN_IDS`
+- **Fixed 2026-10-18 (0.0.10, commit `4aab344`):** `DEFAULT_GRPC` (`config.ts`) and `KNOWN_CHAIN_IDS`
   (`chain.ts`) are `Map`s read with `.get`, so an inherited name is simply unknown (`constructor` without
   `GRPC_URL` is `GRPC_URL is required for network constructor`; with it, the clients' deployment lookup
   rejects it). Tests: `config.test.ts` (*treats NETWORK as data*), `chain.test.ts` (*has no inherited
@@ -1055,7 +1055,7 @@ interval, 15 s by default) is theirs to make; recommendation: 4 intervals (60 s)
 
 ### F21 — `noUncheckedIndexedAccess` is off (found by the TS lens *Compiler strictness* check, 2026-10-09)
 
-**Severity:** Info   **Disposition:** RESOLVED (0.0.10, commit pending)
+**Severity:** Info   **Disposition:** RESOLVED (0.0.10, commit `4aab344`)
 **Where:** `tsconfig.json` (`strict: true`, no `noUncheckedIndexedAccess`, `skipLibCheck: true`);
 `src/api.ts:251`, `src/store.ts:316`.
 
@@ -1081,7 +1081,7 @@ without a guard.
 (a small change; not made in this pass, which makes no code changes). Accepted for testnet because the
 service is display-only and the two sites are guarded.
 
-**Resolution (2026-10-18, 0.0.10, commit pending):** `noUncheckedIndexedAccess` is on in `tsconfig.json`
+**Resolution (2026-10-18, 0.0.10, commit `4aab344`):** `noUncheckedIndexedAccess` is on in `tsconfig.json`
 (`src` and `tests`); `tsc --noEmit` is clean.
 
 - `api.ts` (gate stats route): `parseId(parts[3] ?? null, 'gate id')` and a `400` if it is absent, instead of
@@ -1336,15 +1336,14 @@ Every test project that exists runs in CI (there is one vitest project, `environ
 
 ### pre-mainnet
 
-- [x] SBOM includes the bundled dependencies (IMG-M8) — F18 (0.0.10, commit pending): second SPDX
+- [x] SBOM includes the bundled dependencies (IMG-M8) — F18 (0.0.10, commit `4aab344`): second SPDX
   attestation from `npm sbom --omit dev`, checked by `scripts/check-sbom.mjs` and `tests/sbom.test.ts`;
   confirm the referrer on the 0.0.10 digest after the release
 - [ ] clients treat a stale head page as unavailable — F19; coordinated client change, gated on mainnet
 - [ ] a mainnet deployment recorded in both clients (startup otherwise throws by design); then
   `NETWORK=mainnet` with the recorded chain id `35834a8a` — mainnet-blocked (access-gate-sui and
   seal-policies-sui publication, `OPERATOR_TASKS.md` "Mainnet release custody")
-- [x] `noUncheckedIndexedAccess` enabled (F21) and the `Object.hasOwn` hygiene (F20) — 0.0.10, commit
-  pending: flag on, `tsc` clean; `Map` lookups with tests
+- [x] `noUncheckedIndexedAccess` enabled (F21) and the `Object.hasOwn` hygiene (F20) — 0.0.10, commit `4aab344`: flag on, `tsc` clean; `Map` lookups with tests
 - [ ] volume snapshot or backup policy for `sui-indexer-data` (F3) — maintainer item; no `OPERATOR_TASKS.md`
   row yet
 - [ ] Cloudflare zone rate-limit rule (F6) — maintainer item (free plan)
@@ -1478,7 +1477,7 @@ All four first-pass questions are decided; none remains open.
 
 ## Re-verification log
 
-- 2026-10-18 — code gates closed in `0.0.10` (commit pending), on top of `d1910e0`.
+- 2026-10-18 — code gates closed in `0.0.10` (commit `4aab344`), on top of `d1910e0`.
   - **Fixed:** F18 (and F4): the release attests a second SPDX SBOM from `npm sbom --omit dev`, checked by
     `scripts/check-sbom.mjs` (CI `check` job and the release). F20: `Map` lookups for `NETWORK`. F21:
     `noUncheckedIndexedAccess` on, two `src/` and five test sites fixed. F11 residuals 1, 2 and the
