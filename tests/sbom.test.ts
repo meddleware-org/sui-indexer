@@ -9,10 +9,12 @@ const SCRIPT = join(import.meta.dirname, '..', 'scripts', 'check-sbom.mjs')
 
 const lock = {
   packages: {
-    '': { devDependencies: { typescript: '~6.0.3', vitest: '~5.0.2' } },
-    'node_modules/@mysten/sui': { version: '2.35.0' },
+    '': { devDependencies: { typescript: '~6.0.3', vitest: '~5.0.2', zod: '^4.0.0' } },
+    'node_modules/@mysten/sui': { version: '2.35.0', dependencies: { zod: '^4.0.0' }, peerDependencies: { typescript: '>=5' } },
     'node_modules/@mysten/sui/node_modules/nested': { version: '1.0.0' },
-    'node_modules/typescript': { version: '6.0.3', peer: true },
+    // Locked without a `peer`/`dev` flag, as some npm versions (e.g. Dependabot's) write it: still not expected.
+    'node_modules/typescript': { version: '6.0.3' },
+    'node_modules/zod': { version: '4.0.0' },
     'node_modules/vitest': { version: '5.0.3', dev: true },
     'node_modules/fsevents': { version: '2.3.3', optional: true },
   },
@@ -34,9 +36,9 @@ describe('check-sbom', () => {
   }
 
   it('passes when every production package is listed (dev, optional and dev-peer entries are not expected)', () => {
-    const r = run(sbomOf('@meddleware/sui-indexer@0.0.10', '@mysten/sui@2.35.0', 'nested@1.0.0'))
+    const r = run(sbomOf('@meddleware/sui-indexer@0.0.10', '@mysten/sui@2.35.0', 'nested@1.0.0', 'zod@4.0.0'))
     expect(r.status).toBe(0)
-    expect(r.stdout).toContain('lists all 2 production packages')
+    expect(r.stdout).toContain('lists all 3 production packages')
   })
 
   it('fails and names a bundled package the SBOM omits', () => {
@@ -45,8 +47,14 @@ describe('check-sbom', () => {
     expect(r.stderr).toContain('@mysten/sui@2.35.0')
   })
 
+  it('still expects a root devDependency that a production package depends on (regular edge)', () => {
+    const r = run(sbomOf('@meddleware/sui-indexer@0.0.10', '@mysten/sui@2.35.0', 'nested@1.0.0'))
+    expect(r.status).toBe(1)
+    expect(r.stderr).toContain('zod@4.0.0')
+  })
+
   it('fails on a version mismatch and on an SBOM without packages', () => {
-    expect(run(sbomOf('@mysten/sui@2.34.0', 'nested@1.0.0')).status).toBe(1)
+    expect(run(sbomOf('@mysten/sui@2.34.0', 'nested@1.0.0', 'zod@4.0.0')).status).toBe(1)
     expect(run({ packages: [] }).status).toBe(1)
   })
 })

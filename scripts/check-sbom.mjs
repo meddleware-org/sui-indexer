@@ -23,13 +23,21 @@ if (!Array.isArray(sbom.packages) || sbom.packages.length === 0) {
 }
 
 const listed = new Set(sbom.packages.map((p) => `${p.name}@${p.versionInfo}`))
-// A root devDependency that is also an (uninstalled) peer of a production package is locked without
-// `dev: true`; `npm sbom --omit dev` rightly leaves it out, so it is not expected here.
+// A root devDependency that production packages only *peer*-depend on is not installed for production, so
+// `npm sbom --omit dev` rightly leaves it out. Whether the lockfile marks such an entry `peer` (or `dev`)
+// depends on the npm version that wrote it, so the flag is not trusted: a root devDependency is expected only
+// if a production package (or the root) requires it through a regular or optional dependency edge.
 const rootDev = new Set(Object.keys(lock.packages['']?.devDependencies ?? {}))
+const requiredByProduction = new Set(Object.keys(lock.packages['']?.dependencies ?? {}))
+for (const [path, p] of Object.entries(lock.packages)) {
+  if (path === '' || p.dev) continue
+  for (const name of [...Object.keys(p.dependencies ?? {}), ...Object.keys(p.optionalDependencies ?? {})]) requiredByProduction.add(name)
+}
+const nameOf = (path) => path.slice(path.lastIndexOf('node_modules/') + 'node_modules/'.length)
 const expected = Object.entries(lock.packages)
   .filter(([path, p]) => path.startsWith('node_modules/') && !p.dev && !p.optional)
-  .filter(([path, p]) => !(p.peer && rootDev.has(path.slice('node_modules/'.length))))
-  .map(([path, p]) => `${path.slice(path.lastIndexOf('node_modules/') + 'node_modules/'.length)}@${p.version}`)
+  .filter(([path]) => !(rootDev.has(nameOf(path)) && !requiredByProduction.has(nameOf(path))))
+  .map(([path, p]) => `${nameOf(path)}@${p.version}`)
 const missing = expected.filter((id) => !listed.has(id))
 if (expected.length === 0 || missing.length > 0) {
   console.error(`${sbomPath}: ${expected.length === 0 ? 'the lockfile lists no production packages' : `missing ${missing.length} of ${expected.length} production packages: ${missing.join(', ')}`}`)
