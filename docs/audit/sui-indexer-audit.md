@@ -26,6 +26,18 @@ cites them).
 
 **Deployment status:**
 
+- **Current (2026-10-18): `0.0.10`, released and deployed.** Tag `v0.0.10` = `5251f38` (code gates in
+  `4aab344`). Index `sha256:b3484ce42a8484383efd598a3f21d3cb7077c7e3d4b73eb0df1c740b221d8a58` on quay.io and
+  Docker Hub (same digest; pinned in `config/images.yaml` and the `post-bootstrap/sui-indexer` overlay). The cosign
+  keyless signature was verified 2026-10-18 against the workflow-anchored identity (`docker-publish.yml@refs/tags/v*`,
+  `bootstrap/images/verify-digests.sh`, 16/16 valid). **The 0.0.10 digest carries two SPDX attestations: the
+  image SBOM (17 packages) and the npm packages SBOM (24 packages); both were verified with `cosign
+  verify-attestation --type spdxjson` on 2026-10-18** (closes the post-release check of F18). The rollout
+  (`apply.sh sui-indexer`) succeeded and `/healthz` reads `ok` on the same database generation `e32e37afbbe9`
+  as before (the SQLite index on the Longhorn PVC was kept; re-read 2026-10-18 15:18Z: `ok: true`, both streams
+  `ok`, last polls 3 s old). The live bundles of the consuming apps contain only the current ids (`0xd7ddaa94…`,
+  `0x0c8f7349…`, gate `0x316f1bf9…`). The lines below describe the 0.0.9 deployment of 2026-10-09 and are kept as the
+  baseline of that review.
 - Tag `v0.0.9` = `a3369bb` (HEAD of `main`, 2026-10-09). Tags `v0.0.5`–`v0.0.9` were released 2026-10-08
   and 2026-10-09 (see the CHANGELOG).
 - `quay.io/meddleware-org/sui-indexer:0.0.9` = `docker.io/meddleware/sui-indexer:0.0.9` = index
@@ -45,7 +57,7 @@ cites them).
   `VITE_INDEXER_URL` (`https://sui-indexer.meddleware.co.uk`). Decoding happens in access-gate-client
   (0.0.8) and seal-client (0.0.19).
 
-**Review date:** 2026-10-03; re-verified 2026-10-09 (code at `a3369bb` = tag `v0.0.9`)
+**Review date:** 2026-10-03; re-verified 2026-10-09 (code at `a3369bb` = tag `v0.0.9`); code gates closed in 0.0.10 (`5251f38`), released and deployed 2026-10-18
 **Reviewer:** Internal review
 **Severity ceiling:** Medium.
 
@@ -57,7 +69,7 @@ cites them).
 - None of these can move funds or grant access.
 - Realised ceiling at this pass: **Low**.
 
-**Status:** re-verified 2026-10-09 against `v0.0.9`; code gates closed 2026-10-18 in `0.0.10` (commit `4aab344`).
+**Status:** re-verified 2026-10-09 against `v0.0.9`; code gates closed 2026-10-18 in `0.0.10` (commit `4aab344`; released and deployed 2026-10-18, signature and both SBOM attestations verified, rollout succeeded).
 Of F1–F14, 5 findings were RESOLVED, 4 MITIGATED, 2 ADJUDICATED and the 3 Positives stand; F15–F21 were
 added (F15–F17 RESOLVED, F18–F19 DEFERRED to the pre-mainnet gate, F20 ADJUDICATED, F21 ACCEPTED-RISK).
 2026-10-18: F18, F20 and F21 are RESOLVED in 0.0.10, and F4 follows F18 to RESOLVED. Totals for F1–F21:
@@ -87,11 +99,11 @@ Nothing is open without a named gate. First pass: 2026-10-03; there is no predec
 
 | Field | Value |
 | --- | --- |
-| Images | `quay.io/meddleware-org/sui-indexer:0.0.9@sha256:aea58153…1704` and `docker.io/meddleware/sui-indexer:0.0.9` (same index digest, amd64 + arm64); self-hosted mirror best-effort |
+| Images | `quay.io/meddleware-org/sui-indexer:0.0.10@sha256:b3484ce42a8484383efd598a3f21d3cb7077c7e3d4b73eb0df1c740b221d8a58` and `docker.io/meddleware/sui-indexer:0.0.10` (same index digest, amd64 + arm64; cosign signature and two SPDX attestations verified 2026-10-18; superseded 0.0.9 was `sha256:aea58153…1704`); self-hosted mirror best-effort |
 | Base images | builder `node:24-trixie-slim@sha256:8ec5d755…cffe`; runtime `gcr.io/distroless/nodejs24-debian13:nonroot@sha256:9eeb7f58…278e` (bumped in 0.0.8 for the libssl advisories, F17) |
 | Runtime user | `65532:65532` (distroless nonroot; the published 0.0.9 image config says `65532:65532`) |
 | Runtime FS | `/data` volume (SQLite, 1 Gi Longhorn RWO PVC). The manifest sets `readOnlyRootFilesystem: true`, `allowPrivilegeEscalation: false`, `capabilities.drop: [ALL]`, `runAsNonRoot` (65532), `seccompProfile: RuntimeDefault` and `automountServiceAccountToken: false`. |
-| Deployed by | infrastructure workspace `post-bootstrap/sui-indexer` (read 2026-10-09); digest from `config/images.yaml` (`sha256:aea58153…1704`) stamped into the overlay |
+| Deployed by | infrastructure workspace `post-bootstrap/sui-indexer` (read 2026-10-09); digest from `config/images.yaml` (`sha256:b3484ce4…8a58`, 0.0.10, since 2026-10-18; `sha256:aea58153…1704` at 0.0.9) stamped into the overlay |
 | Build args | `VERSION`, `VENDOR`, `DESCRIPTION`, `SOURCE_URL`, `DOCUMENTATION_URL`, `IMAGE_URL` — all labels; no secrets |
 
 **Location:** `sui-indexer/docs/audit/sui-indexer-audit.md`. This is the canonical audit (repo-local).
@@ -974,7 +986,7 @@ steps.
 
 ### F18 — The signed SBOM still omits the bundled npm packages
 
-**Severity:** Low   **Disposition:** RESOLVED (0.0.10, commit `4aab344`; verify the new attestation on the 0.0.10 digest after the release)
+**Severity:** Low   **Disposition:** RESOLVED (0.0.10, commit `4aab344`; the new attestation was verified on the released 0.0.10 digest on 2026-10-18)
 **Where:** `.github/workflows/docker-publish.yml` ("Generate SBOM": `anchore/sbom-action` with `image:`);
 `Dockerfile` (lockfile copied to `/app`).
 
@@ -1002,8 +1014,9 @@ build time; the Trivy image scan may read the shipped lockfile (not verified).
   expected). `node-ci.yml` runs the same generation and check, so it also gates the release (`verify`).
   Test: `tests/sbom.test.ts` (complete, a package missing, a version mismatch, an empty SBOM).
 - Not run here: the publish workflow itself (needs the tag and registry credentials) and `cosign`; the
-  commands were run locally (`npm sbom` and the check pass). The first attested npm SBOM is a post-release
-  check on the 0.0.10 digest (referrers).
+  commands were run locally (`npm sbom` and the check pass). **Post-release check done 2026-10-18:** the released
+  0.0.10 digest `sha256:b3484ce4…8a58` carries two SPDX attestations, the image SBOM (17 packages) and the npm
+  packages SBOM (24 packages), both verified with `cosign verify-attestation --type spdxjson`.
 
 ### F19 — The clients do not use the freshness fields the indexer now serves
 
@@ -1219,7 +1232,7 @@ audit in the workflow); audit at `high`, no allowlist. No npm publish.
 
 | Registry | Signature | SBOM attestation | Provenance | Notes |
 | --- | --- | --- | --- | --- |
-| Docker Hub | cosign keyless (referrer) | SPDX via cosign (referrer; annotation mislabelled — F10; content of the 0.0.9 attestation lacks the bundle; 0.0.10 adds a second, npm-only SBOM attestation — F18) | BuildKit SLSA (in-index) + GitHub attestation (referrer) | verified 2026-10-09 on `sha256:aea58153…1704` (referrers listed; signature identity not re-run) |
+| Docker Hub | cosign keyless (referrer) | SPDX via cosign (referrer; annotation mislabelled — F10; content of the 0.0.9 attestation lacks the bundle; 0.0.10 adds a second, npm-only SBOM attestation — F18, both verified on the released digest 2026-10-18) | BuildKit SLSA (in-index) + GitHub attestation (referrer) | verified 2026-10-09 on `sha256:aea58153…1704` (referrers listed; signature identity not re-run) |
 | quay.io | per workflow | per workflow | per workflow | index digest equals Docker Hub's (2026-10-09, `skopeo`); referrers not listed |
 | Self-hosted | none | none | BuildKit only | best-effort mirror |
 
@@ -1338,7 +1351,7 @@ Every test project that exists runs in CI (there is one vitest project, `environ
 
 - [x] SBOM includes the bundled dependencies (IMG-M8) — F18 (0.0.10, commit `4aab344`): second SPDX
   attestation from `npm sbom --omit dev`, checked by `scripts/check-sbom.mjs` and `tests/sbom.test.ts`;
-  confirm the referrer on the 0.0.10 digest after the release
+  confirmed on the released 0.0.10 digest, 2026-10-18: two SPDX attestations (image SBOM, 17 packages; npm packages SBOM, 24 packages) verified with `cosign verify-attestation --type spdxjson`
 - [ ] clients treat a stale head page as unavailable — F19; coordinated client change, gated on mainnet
 - [ ] a mainnet deployment recorded in both clients (startup otherwise throws by design); then
   `NETWORK=mainnet` with the recorded chain id `35834a8a` — mainnet-blocked (access-gate-sui and
@@ -1428,9 +1441,9 @@ Every test project that exists runs in CI (there is one vitest project, `environ
 | IMG-M3 | yes | F14 |
 | IMG-M4 | yes | front matter |
 | IMG-M5 | yes (image 65532; pod context read from the manifest 2026-10-09) | B.IMG-2 |
-| IMG-M6 | yes (digest from `config/images.yaml`; 16/16 images cosign-verified 2026-10-09) | B.IMG-2, B.IMG-1 |
+| IMG-M6 | yes (digest from `config/images.yaml`; 16/16 images cosign-verified 2026-10-09 and again 2026-10-18) | B.IMG-2, B.IMG-1 |
 | IMG-M7 | yes (signature, SBOM attestation and provenance present on Docker Hub; the private mirror is best-effort) | F10, B.IMG-1 |
-| IMG-M8 | yes from 0.0.10 (scan before sign, licence notices, identity-pinned verification; the bundle is listed in a second attested SBOM); confirm on the first published digest | F10, F5, F18 |
+| IMG-M8 | yes from 0.0.10 (scan before sign, licence notices, identity-pinned verification; the bundle is listed in a second attested SBOM; confirmed on the published 0.0.10 digest, 2026-10-18) | F10, F5, F18 |
 
 ## Implementation suggestions (SHOULD / MAY)
 
@@ -1535,6 +1548,7 @@ All four first-pass questions are decided; none remains open.
   - **No findings resolved:** by maintainer instruction this pass only records findings. Remediation,
     including single-solution fixes under the resolve-inline rule, is to be applied separately, with
     each disposition moved to RESOLVED and the diff cited.
+- 2026-10-18 — released and deployed (`v0.0.10` = `5251f38`, `0.0.10@sha256:b3484ce42a8484383efd598a3f21d3cb7077c7e3d4b73eb0df1c740b221d8a58`), verified live. Cosign keyless signature verified against the workflow-anchored identity (`verify-digests.sh` 16/16); the digest carries two SPDX attestations, the image SBOM (17 packages) and the npm packages SBOM (24 packages), both verified with `cosign verify-attestation --type spdxjson` on 2026-10-18 (F18 post-release check closed); rollout succeeded; `/healthz` ok on the same database generation `e32e37afbbe9` (re-read 2026-10-18). F19 (client change), F3 volume backup, the Cloudflare zone rule and the external review remain open.
 
 ## Pre-save consistency checklist (this pass)
 
