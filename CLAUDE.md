@@ -40,7 +40,7 @@ A read-indexer for display data. See [README.md](README.md) for the API and conf
 - **Strict input.** Unknown query parameters, bad ids and limits get `400`. That also stops
   cache-busting parameters from reaching the origin as new cache keys.
 - **Lean.**
-  - Node 24 built-ins (`node:sqlite`, `node:http`) plus the client packages, as one esbuild bundle
+  - Node 26 built-ins (`node:sqlite`, `node:http`) plus the client packages, as one esbuild bundle
     on distroless nonroot.
   - Do not add a web framework, an ORM or a second process.
 - **Single writer.** One replica with an RWO volume. SQLite WAL allows concurrent reads within the

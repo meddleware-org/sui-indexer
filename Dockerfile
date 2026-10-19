@@ -1,6 +1,6 @@
 # ── Build stage ───────────────────────────────────────────────────────────────
 # Bases pinned by digest for reproducible builds; the tags are kept for readability.
-# To bump: skopeo inspect --format '{{.Digest}}' docker://docker.io/library/node:24-trixie-slim
+# To bump: skopeo inspect --format '{{.Digest}}' docker://docker.io/library/node:26-trixie-slim
 FROM docker.io/library/node:26-trixie-slim@sha256:0d1e33586362bb9e608c4e751e7a9e7edb55c9ac11461ed5666af696cc461dd4 AS builder
 
 WORKDIR /src
@@ -13,8 +13,8 @@ COPY scripts ./scripts
 RUN npm run build && npm run licenses
 
 # ── Runtime stage ─────────────────────────────────────────────────────────────
-# distroless Node 24: no shell, no package manager; runs as nonroot (65532).
-# To bump: skopeo inspect --format '{{.Digest}}' docker://gcr.io/distroless/nodejs24-debian13:nonroot
+# distroless Node 26: no shell, no package manager; runs as nonroot (65532).
+# To bump: skopeo inspect --format '{{.Digest}}' docker://gcr.io/distroless/nodejs26-debian13:nonroot
 FROM gcr.io/distroless/nodejs26-debian13:nonroot@sha256:044d090d0c3ccfd30722126ebe46704885698970c8a303419dc0d704d628f0da
 
 ARG VERSION=dev

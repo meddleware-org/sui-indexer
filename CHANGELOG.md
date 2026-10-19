@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.11] - 2026-10-19
+
+### Changed
+
+- **Runs on Node 26.** The runtime image is `gcr.io/distroless/nodejs26-debian13:nonroot` (was nodejs24) and the
+  builder is `node:26-trixie-slim`; CI runs on Node 26.12. Node 26 becomes LTS on 2026-10-28; the image tags and the
+  digests we pin do not change at that promotion. `engines.node` stays `>=24`. The full suite (53 tests, `node:sqlite`
+  ingest and API) passes on Node 26, and the container smoke test runs in CI on the new image.
+
 ## [0.0.10] - 2026-10-18
 
 ### Added

@@ -5,7 +5,7 @@ A lean read-indexer for Meddleware's Sui packages. It polls the `access_gate` ev
 serves cacheable GET pages. Apps use it to list history cheaply and fall back to the full node when
 it is unavailable.
 
-- **One process.** Node 24, `node:sqlite` (WAL) and `node:http`, shipped as one esbuild bundle on
+- **One process.** Node 26, `node:sqlite` (WAL) and `node:http`, shipped as one esbuild bundle on
   distroless. A one-off laptop
   measurement against a small database (not a benchmark) gave about 110 MB RSS at 3.5k req/s; request cost does
   not grow with history, memory is bounded by the page cache.
