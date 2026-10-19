@@ -1,6 +1,6 @@
 # Security Audit — `sui-indexer`
 
-**Classification:** Internal security review (re-verified 2026-10-09; code gates closed 2026-10-18; re-verified 2026-10-19 against the Rust rewrite 0.0.12 — awaiting external review)
+**Classification:** Internal security review (re-verified 2026-10-09; code gates closed 2026-10-18; re-verified 2026-10-19 against the Rust rewrite 0.0.12; F25 closed in 0.0.13 — awaiting external review)
 **Project:** sui-indexer — a lean read-indexer for display data.
 
 - It polls two streams from a Sui full node over gRPC into SQLite (WAL):
@@ -30,6 +30,9 @@ packages against the binary (lockfile committed, Dependabot-tracked, never shipp
 
 **Deployment status:**
 
+- **2026-10-19: `0.0.13` (F25: the `events_kind` index) committed locally on top of `0.0.12`, not released or
+  deployed.** It changes no response and no rollout order; the ingester adds the index to the existing
+  database at its first start.
 - **2026-10-19: `0.0.12` (Rust rewrite) committed locally, not released or deployed.** Commits `1fcbbe9`
   (rewrite), `76595ca`, `784250a` (CI, image, SBOM), `ddfc77d` (connection cap) and the docs commit on top of
   `fb79cd7`. The cluster still runs `0.0.11` (`sha256:c2497d4c…5abe`, the digest in `config/images.yaml`).
@@ -67,7 +70,7 @@ packages against the binary (lockfile committed, Dependabot-tracked, never shipp
   `VITE_INDEXER_URL` (`https://sui-indexer.meddleware.co.uk`). Decoding happens in access-gate-client
   (0.0.8) and seal-client (0.0.19).
 
-**Review date:** 2026-10-03; re-verified 2026-10-09 (code at `a3369bb` = tag `v0.0.9`); code gates closed in 0.0.10 (`5251f38`), released and deployed 2026-10-18; re-verified 2026-10-19 against the Rust rewrite (0.0.12, local commits, not released)
+**Review date:** 2026-10-03; re-verified 2026-10-09 (code at `a3369bb` = tag `v0.0.9`); code gates closed in 0.0.10 (`5251f38`), released and deployed 2026-10-18; re-verified 2026-10-19 against the Rust rewrite (0.0.12, local commits, not released); F25 fixed in 0.0.13 (local commit)
 **Reviewer:** Internal review
 **Severity ceiling:** Medium.
 
@@ -93,6 +96,9 @@ DEFERRED, OQ5), F26 (no connection cap, found by the RUST lens, RESOLVED). F11's
 infrastructure "rebuildable from the chain" wording) is fixed in the workspace manifests, so F11 is RESOLVED.
 Totals for F1–F26: 15 RESOLVED, 2 MITIGATED, 3 ADJUDICATED, 0 ACCEPTED-RISK, 2 DEFERRED (F19, F25),
 4 Positive.
+**2026-10-19 (0.0.13):** F25 is RESOLVED (an `events_kind (stream, kind, id)` index created by the ingester, a
+query that seeks it once per kind, query-plan and page-cost tests; OQ5 decided). Totals for F1–F26:
+16 RESOLVED, 2 MITIGATED, 3 ADJUDICATED, 0 ACCEPTED-RISK, 1 DEFERRED (F19, a client change), 4 Positive.
 
 **Front matter (RUST lens, from 0.0.12):**
 
@@ -151,9 +157,9 @@ workspace; the HTTP API and the database are unchanged:
 | `api` (`handler.rs`, `query.rs`, `ratelimit.rs`, `server.rs`, `lib.rs`, `main.rs`) | routing, validation, canonical URLs, cache headers and ETags, rate limit; WHATWG-exact URL/query handling; hyper server with timeouts, a connection cap and graceful shutdown |
 | `testkit` | fixtures and `seed-fixture` (CI only) |
 
-- **Tests:** 107 Rust tests (store 32, ingest 35, api 40; 7 of them property tests), 5 client-contract tests
+- **Tests:** 111 Rust tests (store 36, ingest 35, api 40; 7 of them property tests; plus one `--ignored` measurement), 5 client-contract tests
   (the published client packages against the built binary), 10 SBOM-gate script cases, the two-container
-  smoke test. Line coverage 90.7% (`cargo llvm-cov`; the two `main.rs` are thin and run by the smoke test).
+  smoke test. Line coverage 90.8% (`cargo llvm-cov`; the two `main.rs` are thin and run by the smoke test).
 - **Equivalence evidence:** every API case of 0.0.11 ported; the local `api` over a database the Rust
   ingester built from testnet answered byte-identically to the live 0.0.11 instance for 10 routes and 6
   error/redirect cases (modulo generation and poll time); JSON-derived vs BCS-derived columns 19/19 on every
@@ -230,11 +236,11 @@ cites the commit and the test that pins it.
 
 | Disposition | Findings |
 | --- | --- |
-| RESOLVED | F1 (full-stream scans), F4 and F18 (SBOM of the bundled code: npm in 0.0.10, Cargo per binary in 0.0.12), F5 (licence notices), F6 (cache key and limiter), F9 (casts, ETags), F10 (CI and image pipeline), F11 (documentation drift; last residual fixed 2026-10-19), F15 (pruned-cursor wedge), F16 (chain-identity startup bug; the startup path is now tested), F17 (libssl advisories in the base image), F20 (operator-keyed lookups), F21 (`noUncheckedIndexedAccess`; TS-only, superseded), F23 (health across two processes, 0.0.12), F26 (connection cap, 0.0.12) |
+| RESOLVED | F1 (full-stream scans), F25 (rare-kind `kinds` filters; `events_kind`, 0.0.13), F4 and F18 (SBOM of the bundled code: npm in 0.0.10, Cargo per binary in 0.0.12), F5 (licence notices), F6 (cache key and limiter), F9 (casts, ETags), F10 (CI and image pipeline), F11 (documentation drift; last residual fixed 2026-10-19), F15 (pruned-cursor wedge), F16 (chain-identity startup bug; the startup path is now tested), F17 (libssl advisories in the base image), F20 (operator-keyed lookups), F21 (`noUncheckedIndexedAccess`; TS-only, superseded), F23 (health across two processes, 0.0.12), F26 (connection cap, 0.0.12) |
 | MITIGATED | F2 (stuck ingest; clients ignore `polledAt`, see F19), F3 (history loss on config change fixed; volume loss remains) |
 | ADJUDICATED | F7 (new event types need a fresh publish), F8 (display-only trust in the node; chain identity now checked), F24 (stored columns from the node's JSON rendering; parity gate) |
 | ACCEPTED-RISK | none |
-| DEFERRED | F19 (clients treat a stale head page as unavailable): pre-mainnet gate row in Section D; the change lives in access-gate-client and seal-client. F25 (rare-kind filters walk the stream; an additive index after the cutover, OQ5) |
+| DEFERRED | F19 (clients treat a stale head page as unavailable): pre-mainnet gate row in Section D; the change lives in access-gate-client and seal-client |
 | Positive | F12, F13, F14, F22 (read-only API process) |
 
 **Posture:**
@@ -371,8 +377,8 @@ configuration and the cluster platform (platform lens).
 | Command | Result |
 | --- | --- |
 | `cargo fmt --check` / `cargo clippy --all-targets --locked -- -D warnings` | clean / clean |
-| `cargo test --locked` | **107 passed** (store 32, ingest 35, api 40) |
-| `cargo llvm-cov --summary-only` | lines 90.7%, functions 87.6%, regions 89.4% (`main.rs` of both binaries 0%: thin, run by the smoke test) |
+| `cargo test --locked` | **111 passed** (store 36, ingest 35, api 40) and 1 ignored measurement (`f25_measurement_on_300k_rows`), 2026-10-19 on 0.0.13 |
+| `cargo llvm-cov --summary-only` | lines 90.8%, functions 87.7%, regions 89.6% (`main.rs` of both binaries 0%: thin, run by the smoke test) |
 | `cargo +1.88 check --locked --workspace --all-targets` | passes (MSRV 1.88; let-chains need it) |
 | `cargo deny check` (0.20.2) | advisories ok, bans ok (duplicates warned: `getrandom`, `syn`), licenses ok, sources ok |
 | `cargo about generate --fail` (0.9.2), per binary | passes; `api` 44 crates, `ingest` 137 crates |
@@ -380,7 +386,7 @@ configuration and the cluster platform (platform lens).
 | `tests/contract` (vitest, `@meddleware/access-gate-client` 0.0.9, `@meddleware/seal-client` 0.0.20) | 5 passed against `target/release/api` |
 | `podman build` | image 38.3 MB; `DOCKER=podman bash scripts/smoke.sh` passes (two containers, API mount `:ro`) |
 | Live (read-only) | `ingest` against `fullnode.testnet.sui.io` into a scratch DB (11 events), `api` on it: 10 routes and 6 error/redirect cases identical to `https://sui-indexer.meddleware.co.uk` (generation and poll time aside); parity 19/19 (F24) |
-| Load (dev-only closed-loop client, 64 keep-alive connections, 10 s, limiter raised) | head page ≈ 18k req/s (11 rows), ≈ 14k req/s (300k rows); `gate=` filter ≈ 5.2k req/s; `kinds=AccessConsumed` on 300k rows **10 req/s** (F25) |
+| Load (dev-only closed-loop client, 64 keep-alive connections, 10 s, limiter raised) | head page ≈ 18k req/s (11 rows), ≈ 14k req/s (300k rows); `gate=` filter ≈ 5.2k req/s; `kinds=AccessConsumed` on 300k rows **10 req/s** on 0.0.12 (F25). On 0.0.13 (same 300k rows, 16 keep-alive connections from a Python client, so the client bounds the top figure): head page ≈ 5.9k, `kinds=AccessConsumed` ≈ 5.9k (0.0.12 binary on the same data: 7), two kinds ≈ 5.2k (0.0.12: ≈ 5.8k; one seek per kind is a little dearer when both kinds are common), `gate=` ≈ 5.8k req/s. Single thread through `Reader::page`: 8 pages/s before, ≈ 33,000 after. Index build on 300k rows ≈ 0.5 s; 8,554 head-page reads ran meanwhile, the slowest 0.57 ms |
 | Not run | the publish workflow, cosign, Trivy, actionlint (GitHub Actions runs them); the cluster rollout |
 
 First-pass commands (2026-10-03, Node 22.22.2) are recorded in the re-verification log.
@@ -455,7 +461,7 @@ First-pass commands (2026-10-03, Node 22.22.2) are recorded in the re-verificati
   there is no separate benchmark test beyond the 50k-row case.
 - Live: `/v1/testnet/coverage` answers from the counters (2026-10-09).
 
-**Re-verified 2026-10-19 (0.0.12, Rust):** The counters are kept verbatim: `Store::ingest` (`crates/store/src/lib.rs`) bumps `stream_stats`, `gate_stats` and `gate_commission` in the page transaction (commission summed as `u128`, stored as decimal text), and `backfill_stats` rebuilds them once (`stats:v2`). `coverage`, `health`, `gate_stats` and `head_id` are single-row or index reads. Tests: *counters_stay_exact_across_duplicates_and_agree_with_a_recount*, *counters_are_rebuilt_…*, *coverage_over_50k_rows_is_a_constant_time_read*, *commission_totals_are_exact_beyond_64_bits*. Disposition unchanged (RESOLVED). One request shape still walks rows: a `kinds` filter for a rare kind (F25, pre-existing).
+**Re-verified 2026-10-19 (0.0.12, Rust):** The counters are kept verbatim: `Store::ingest` (`crates/store/src/lib.rs`) bumps `stream_stats`, `gate_stats` and `gate_commission` in the page transaction (commission summed as `u128`, stored as decimal text), and `backfill_stats` rebuilds them once (`stats:v2`). `coverage`, `health`, `gate_stats` and `head_id` are single-row or index reads. Tests: *counters_stay_exact_across_duplicates_and_agree_with_a_recount*, *counters_are_rebuilt_…*, *coverage_over_50k_rows_is_a_constant_time_read*, *commission_totals_are_exact_beyond_64_bits*. Disposition unchanged (RESOLVED). One request shape still walked rows in 0.0.12: a `kinds` filter for a rare kind (F25, pre-existing); fixed in 0.0.13 (note on F25).
 
 ### F2 — One undecodable event halts both streams forever; stale pages give no signal
 
@@ -1312,7 +1318,7 @@ becomes a second input that must agree with the BCS.
 
 ### F25 — A `kinds` filter for a rare kind walks the stream (found 2026-10-19 by the load test)
 
-**Severity:** Low   **Disposition:** DEFERRED (pre-existing in 0.0.4–0.0.11; an additive index after the 0.0.12 cutover, OQ5)
+**Severity:** Low   **Disposition:** RESOLVED (2026-10-19, 0.0.13, commit pending; pre-existing in 0.0.4–0.0.12; OQ5 decided)
 **Where:** `crates/store/src/lib.rs` `read::page` (`WHERE stream = ? AND kind IN (…) [AND gate_id = ?]
 ORDER BY id DESC LIMIT ?`); the schema's indexes are `(stream, id)` and `(stream, gate_id, id)` only (same as
 `store.ts`).
@@ -1327,9 +1333,49 @@ cover this path. The same query and schema ran in every TS release.
 the edge cache, a handful of clients can still occupy the API's workers. Live index today: 11 rows, so no
 current effect.
 
-**Remediation (recommended, not applied):** `CREATE INDEX IF NOT EXISTS events_kind ON events (stream, kind, id)`.
-It is additive (0.0.11 ignores it, so a rollback still works) but it is a schema change, and the 0.0.12
-cutover is deliberately schema-identical; apply it in the next patch with a page-cost test for a rare kind.
+**Remediation (applied in 0.0.13):** `CREATE INDEX IF NOT EXISTS events_kind ON events (stream, kind, id)` in
+`SCHEMA`, which only the ingester runs at startup, so a fresh database and an existing one both get it and
+the read-only API never creates it. It is additive (0.0.11 and 0.0.12 ignore it, so a rollback still works).
+The index alone was not enough, so the page query changed too (`page_sql`, `crates/store/src/lib.rs`):
+- With the index, SQLite uses it for one kind but still walks `events_stream` for `kind IN (a, b)` (it prefers
+  that to sorting), and the `AccessMinted,AccessConsumed` request the treasury and DAO apps send is exactly
+  that shape. Several kinds (no gate) now run one bounded seek per kind (`UNION ALL` of `ORDER BY id DESC
+  LIMIT n+1` arms, merged by id): cost O(kinds × limit), independent of history.
+- Where the index would hurt, it is kept out: with a `gate`, the planner chose `events_kind` over `events_gate`
+  for `kinds=AccessMinted&gate=…` and would walk a common kind to find one gate's rows. `+kind` makes the
+  kinds a plain row filter there, so a `gate=` page uses `events_gate` as before.
+- Repeated kinds are ignored (a repeat would duplicate rows in the merge); the API already canonicalises them.
+
+**Evidence (2026-10-19):**
+- Query plans (`EXPLAIN QUERY PLAN`, pinned by *every_filter_shape_uses_the_intended_index*):
+
+  | Shape | 0.0.12 | 0.0.13 |
+  | --- | --- | --- |
+  | none, or `before` only | `events_stream` | `events_stream` |
+  | one kind (± `before`) | `events_stream` (walk) | `events_kind (stream=? AND kind=? [AND id<?])`, no sort |
+  | several kinds (± `before`) | `events_stream` (walk) | `MERGE (UNION ALL)` of one `events_kind` seek per kind |
+  | `gate` | `events_gate` | `events_gate` |
+  | `gate` + kinds | `events_gate` | `events_gate` (kinds filter the gate's rows) |
+
+- Page cost: *a_rare_kind_page_over_300k_rows_costs_a_handful_of_steps* (300,000 rows, 5 of the rare kind):
+  under 5,000 SQLite VM steps for one and for two kinds, with and without a cursor; without the index the
+  same page takes over 100,000 (the test fails if the index is dropped).
+- Equivalence: *merged_kind_seeks_return_what_the_filter_returns* compares 200 random queries (kinds incl.
+  repeats, gate, cursor, limit) against the plain `kind IN` filter, rows and `next`.
+- Migration: *the_ingester_adds_the_index_to_an_older_database_and_it_is_idempotent*: an older database
+  (index dropped) is read correctly by the read-only `Reader` without it, gains it on `Store::open`, and a
+  second open changes nothing; a fresh database has it. The 0.0.11 TypeScript store ignores it.
+- Measured (`f25_measurement_on_300k_rows`, `--release --ignored`): one rare kind 8 → ≈ 33,000 pages/s
+  (single thread); two kinds, one rare ≈ 9,000/s; over HTTP on the same data ≈ 5.9k req/s against 7 for the
+  0.0.12 binary (client-bound, see Environment). **Creating the index on 300,000 rows took ≈ 0.51 s inside
+  `Store::open`** (about 11 MB more in the file and WAL); readers keep reading under WAL: 8,554 head pages were
+  served meanwhile, the slowest in 0.57 ms. The ingester does not poll for that time, which is far inside the
+  `5 × POLL_MS + 30 s` liveness window; the live index (11 rows) builds instantly.
+- Residual, accepted: a `gate` filter on a very large gate with a rare kind still reads that gate's rows
+  (bounded by the gate, as in every earlier release); two common kinds cost two short seeks instead of one
+  (≈ 10% in the HTTP figures above). If the API starts before the ingester has created the index (both containers
+  start together, so for seconds), a rare-kind page is slow as in 0.0.12; multi-kind pages then run one walk
+  per kind, so up to the number of kinds slower than before, until the index exists.
 
 ### F26 — The API had no connection cap (found 2026-10-19 by the RUST lens *HTTP hygiene* check)
 
@@ -1394,9 +1440,9 @@ row says so; the TS-lens rows A16–A24 are replaced by RUST-lens rows (A16–A2
 | A38 | The API never writes and never creates the database | `Reader::open` (read-only flag, `query_only`), read-only mount | F22 tests; smoke test | HOLDS |
 | A39 | `/healthz` and `polledAt` reflect the ingester's real polls | heartbeat rows (`meta poll:<stream>`) | F23 tests | HOLDS |
 | A40 | Stored `kind`/`gate_id`/`commission_mist` equal what the client parsers derive from the BCS | `decode.rs` | parity 19/19 on live testnet events (F24); fixture tests | HOLDS for the kinds seen live; the other kinds rest on the Move field names |
-| A41 | Data continuity with 0.0.11: same schema, generation, cursor encoding; no reindex | `crates/store` `SCHEMA`; `PageBuilder`; `mark_rust_writer` | live cursor equality; *backs_up_an_earlier_writers_database_once_before_marking_it*; byte-identical API answers | HOLDS (rollout pending) |
+| A41 | Data continuity with 0.0.11: same tables, generation, cursor encoding; no reindex (0.0.13 adds one index, which 0.0.11 ignores) | `crates/store` `SCHEMA`; `PageBuilder`; `mark_rust_writer` | live cursor equality; *backs_up_an_earlier_writers_database_once_before_marking_it*; byte-identical API answers | HOLDS (rollout pending) |
 | A42 | Cutover is reversible: a copy before the first Rust write | `Store::mark_rust_writer` (`VACUUM INTO …bak-pre-rust-<ms>`) | store and wiring tests | HOLDS |
-| A43 | Request cost independent of history size for every query shape | counters (F1); indexes | load test | **DOES NOT HOLD for rare-kind filters** (F25, pre-existing; OQ5) |
+| A43 | Request cost independent of history size for every query shape | counters (F1); indexes | load test | HOLDS since 0.0.13 (F25: `events_kind`, query-plan and page-cost tests); it did not hold for rare-kind filters in 0.0.12 |
 
 ---
 
@@ -1575,7 +1621,7 @@ non-canonical one is a `301` the client refuses, and a 100-event page stays unde
 
 ## Section C — Test-coverage & hermetic/live split
 
-### C.1 Coverage grade — A (0.0.12: 107 Rust tests, 90.7% lines; the startup wiring is tested)
+### C.1 Coverage grade — A (0.0.13: 111 Rust tests, 90.8% lines; the startup wiring is tested)
 
 **2026-10-19 (Rust):** the 0.0.11 cases are ported one for one (api 19 → `crates/api/src/tests.rs`, ingest
 22 → `crates/{store,ingest}`, config 5 and chain 3 → `config.rs`/`chain.rs`, sbom 3 → the 10-case
@@ -1703,8 +1749,8 @@ Every test project that exists runs in CI. Up to 0.0.11: one vitest project (52 
 - [x] concurrency limit sized against memory for the configured body cap — F26 (1024 × 32 KiB within the
   128 MiB limit; bodies are never read)
 - [x] image per the IMG lens; crates.io trusted publishing — IMG rows A31–A37; no crates are published (N/A)
-- [ ] rare-kind `kinds` filters bounded (an `events_kind (stream, kind, id)` index, F25, OQ5) — next patch
-  after the 0.0.12 cutover
+- [x] rare-kind `kinds` filters bounded — F25, OQ5: `events_kind (stream, kind, id)` created by the ingester,
+  one seek per kind; query-plan and page-cost tests; 8 → ≈ 33,000 pages/s on 300k rows (0.0.13, commit pending)
 - [ ] the JSON-vs-BCS parity check re-run once sealed-content and gate-lifecycle events exist on the network
   (F24) — gated on those events
 
@@ -1824,13 +1870,13 @@ Every test project that exists runs in CI. Up to 0.0.11: one vitest project (52 
 - **S6** SHOULD generate the SPDX SBOM from the source tree and attest that (F18) — done in 0.0.10.
 - **S7** SHOULD enable `noUncheckedIndexedAccess` and use `Object.hasOwn` / `Map` for operator-keyed lookups
   (F20, F21) — done in 0.0.10.
-- **S8** SHOULD add `events_kind (stream, kind, id)` with a page-cost test for a rare kind (F25, OQ5).
+- **S8** SHOULD add `events_kind (stream, kind, id)` with a page-cost test for a rare kind (F25, OQ5) — done in 0.0.13.
 - **S9** MAY run the client-contract job against the image too (today it runs against the binary built on
   the runner; the smoke test covers the image's processes).
 
 ## Open questions (`OQ#`)
 
-The four first-pass questions are decided; OQ5 (2026-10-19) is open.
+The four first-pass questions and OQ5 are decided.
 
 1. **OQ1** F3 — decided: a fresh publish clears the old package's rows after a `VACUUM INTO` backup;
    history is not kept queryable per package; deletion requires `REINDEX_CONFIRM` naming the stream.
@@ -1840,10 +1886,10 @@ The four first-pass questions are decided; OQ5 (2026-10-19) is open.
 4. **OQ4** — answered 2026-10-09: `/healthz` is wired to the status page ("Chain Access → Chain index",
    `OPERATOR_TASKS.md`); there is **no** volume snapshot or backup policy for `sui-indexer-data` (F3),
    and no `OPERATOR_TASKS.md` row for it yet — a maintainer item.
-5. **OQ5** F25 — when to add `events_kind (stream, kind, id)`: (a) in the 0.0.12 cutover (one rollout, but
-   the cutover would no longer be schema-identical); (b) in the next patch after the cutover has settled
-   (recommended: the cutover stays a pure language change and the index is additive and rollback-safe);
-   (c) not at all, relying on the edge cache and the limiter (the cost grows with history).
+5. **OQ5** F25 — decided 2026-10-19: (b), in the patch after the 0.0.12 cutover (0.0.13), so the cutover stayed a
+   pure language change. The index is additive and rollback-safe, and the ingester creates it at startup
+   (about 0.5 s on 300,000 rows, readers unaffected). Options (a) (in the cutover) and (c) (not at all, relying on
+   the edge cache and the limiter; the cost grows with history) were not taken.
 
 ## Risks
 
@@ -1858,13 +1904,25 @@ The four first-pass questions are decided; OQ5 (2026-10-19) is open.
 - **Upstream node trust:** a compromised full node can inject display rows (F8, display-only); from 0.0.12 it
   also renders the JSON the filter columns come from (F24).
 - **Cutover (0.0.12):** the manifests must not be applied before the 0.0.12 digest is pinned; the
-  `.bak-pre-rust-*` copy and the 0.0.11 digest are the rollback (workspace README). Rare-kind filters walk the
-  stream (F25) as they did before.
+  `.bak-pre-rust-*` copy and the 0.0.11 digest are the rollback (workspace README). Rare-kind filters walked the
+  stream in 0.0.12 (F25); 0.0.13 adds the index.
 
 ---
 
 ## Re-verification log
 
+- 2026-10-19 — F25 closed in `0.0.13` (local commit on top of the 0.0.12 commits; not released, not deployed).
+  - **Fixed:** F25 → RESOLVED: `events_kind (stream, kind, id)` (ingester-created, additive) and a page query
+    with one seek per kind; OQ5 decided (b). A43 now HOLDS; S8 done; Section D row ticked.
+  - **Evidence:** query plans for every filter shape (before/after table on F25), page cost on 300,000 rows
+    (under 5,000 VM steps against over 100,000 without the index), migration of an older database,
+    200-query equivalence against the plain filter; measured 8 → ≈ 33,000 pages/s, index build ≈ 0.5 s with
+    readers unaffected.
+  - **Measured (2026-10-19, 0.0.13):** 111 Rust tests (store 36) + 1 ignored measurement, lines 90.8%;
+    `cargo fmt --check`, `clippy --all-targets --locked -D warnings`, `cargo +1.88 check`, `cargo deny check`
+    and the 10 SBOM-gate cases pass; 5/5 client-contract tests against the built `api` (Node 26).
+  - **Totals F1–F26:** 16 RESOLVED, 2 MITIGATED, 3 ADJUDICATED, 0 ACCEPTED-RISK, 1 DEFERRED (F19), 4 Positive.
+  - **Not run:** the GitHub workflows; the rollout (the new image digest must be pinned first).
 - 2026-10-19 — Rust rewrite (0.0.12; local commits `1fcbbe9`, `76595ca`, `784250a`, `ddfc77d` and the docs
   commit, on `fb79cd7`; not released, not deployed).
   - **Lenses:** AUDIT_TEMPLATE.md + RUST + SUI_CLIENT + IMG at 2026-10-08; TS no longer applies to the service
@@ -1951,14 +2009,14 @@ The four first-pass questions are decided; OQ5 (2026-10-19) is open.
 ## Pre-save consistency checklist (this pass)
 
 - [x] Section A ↔ findings: A16–A24 are RUST rows (2026-10-19); A38–A42 HOLD (F22–F24, cutover); A43 does not
-  hold (F25, DEFERRED with OQ5); A6 caveat (F3, backup on the same volume); A1 caveat (F19).
+  hold in 0.0.12 and holds since 0.0.13 (F25, RESOLVED, OQ5 decided); A6 caveat (F3, backup on the same volume); A1 caveat (F19).
 - [x] Finding header ↔ body: consistent (F1–F26; F11 header moved to RESOLVED with its note).
 - [x] Template line: base + RUST + SUI_CLIENT + IMG with registry dates; untriggered lenses named, TS's
   remaining scope (CI-only contract project) stated.
 - [x] Closing four-part structure present (normative, suggestions, open questions, risks).
 - [x] Section D ↔ dispositions: every unticked item names a gate or a maintainer item (the 0.0.12 rollout,
-  F25/OQ5, the F24 re-run, F19, mainnet, volume backup, edge rule, external review).
+  the F24 re-run, F19, mainnet, volume backup, edge rule, external review).
 - [x] Executive summary ↔ dispositions and ceiling (Medium; realised Low); totals F1–F26 checked
-  (2026-10-19: 15 / 2 / 3 / 0 / 2 / 4).
-- [x] C.1 counts measured 2026-10-19 (107 Rust tests, 5 contract, 10 SBOM-gate cases).
+  (2026-10-19, 0.0.13: 16 / 2 / 3 / 0 / 1 / 4).
+- [x] C.1 counts measured 2026-10-19 (111 Rust tests on 0.0.13, 5 contract, 10 SBOM-gate cases).
 - [x] Re-verification log entry added (2026-10-09, 2026-10-18, 2026-10-19).

@@ -55,9 +55,16 @@ A read-indexer for display data. See [README.md](README.md) for the API and conf
   `SCAN_LIMIT`/`ITEM_LIMIT` resume from the frontier). Changing it orphans every stored cursor.
 - **Generation.** A new database gets a new random generation. Cursors carry it and are refused
   (`410`) across generations, so cached pages of an old database stay self-consistent.
-- **Schema identity.** `crates/store` keeps the schema, pragmas, meta keys and counter semantics of the
+- **Schema identity.** `crates/store` keeps the tables, pragmas, meta keys and counter semantics of the
   0.0.11 TypeScript store, so either version opens the other's database. New `meta` rows are additive
-  (`poll:<stream>`, `ingest:alive`, `schema_writer`).
+  (`poll:<stream>`, `ingest:alive`, `schema_writer`), and so is the one added index.
+- **Indexes match the page query.** `events_stream (stream, id)`, `events_gate (stream, gate_id, id)` and
+  `events_kind (stream, kind, id)` (0.0.13) are created by the ingester only (`SCHEMA`, all `IF NOT
+  EXISTS`); the read-only API never creates one and must keep answering without `events_kind`. `read::page`
+  (`page_sql`) picks the shape: a gate uses `events_gate` (`+kind` keeps the planner off `events_kind`),
+  one kind uses `events_kind`, several kinds run one bounded seek per kind merged by `UNION ALL` (a
+  single `kind IN (…)` makes SQLite walk the stream). A new filter shape or index needs a query-plan test
+  in `crates/store/src/index_tests.rs`.
 - **Package binding.** `Store::bind_packages` records the original id each stream indexes. A stream
   whose package changed (a fresh publish) — or that holds rows from before binding — is NOT cleared
   silently: startup fails with `PackageChangedError` until `REINDEX_CONFIRM` names the stream, then the
@@ -71,7 +78,8 @@ A read-indexer for display data. See [README.md](README.md) for the API and conf
   and skipped; a cursor below the node's retention restarts from its earliest data (a counted gap).
   `/healthz` reports each stream.
 - **Counters, not scans.** `stream_stats`, `gate_stats` and `gate_commission` are updated in the ingest
-  transaction (and rebuilt once for older databases). No request path may scan a stream for them.
+  transaction (and rebuilt once for older databases). No request path may scan a stream for them, and a `kinds` page
+  reads its own rows through `events_kind`.
 - **Canonical URLs.** Non-canonical spellings of a query get a cacheable `301`; the cache-busting
   protection is `400` for unknown parameters plus this.
 - **Cache headers are the cost model.**
@@ -98,7 +106,9 @@ A read-indexer for display data. See [README.md](README.md) for the API and conf
 `cargo test --locked` runs:
 
 - **store** — schema, atomic ingest, counters (and their backfill), package binding and backups, the
-  cutover backup, the read-only view and the persisted WAL files;
+  cutover backup, the read-only view and the persisted WAL files; the `events_kind` migration, the query
+  plan of every filter shape and the page cost of a rare kind on 300,000 rows (`index_tests.rs`; the
+  `--ignored` measurement `f25_measurement_on_300k_rows` prints pages/s before and after);
 - **ingest** — JSON-derived columns, the poll loop against a scripted full node, gap recovery, page
   assembly from stream frames (with proptests), the real `sui-rpc` client against a local LedgerService
   stub, and the startup wiring (chain check, package refusal, backups, loop, healthcheck);

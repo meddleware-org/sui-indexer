@@ -29,6 +29,11 @@ fn minted(gate: &str, checkpoint: u64, commission: i64, tx: &str) -> IndexedEven
     ev("AccessMinted", gate, checkpoint, Some(commission), tx)
 }
 
+/// For `index_tests`: a minted event on `gate`.
+pub(crate) fn minted_for_index(gate: &str, checkpoint: u64, tx: &str) -> IndexedEvent {
+    minted(gate, checkpoint, 1, tx)
+}
+
 fn bound() -> Vec<(Stream, String)> {
     vec![(Stream::AccessGate, addr(AG)), (Stream::SealedContent, addr(SEAL))]
 }

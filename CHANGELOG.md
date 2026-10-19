@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.13] - 2026-10-19
+
+### Changed
+
+- **A `kinds` filter for a rare kind no longer walks the stream (audit F25).** New index
+  `events_kind (stream, kind, id)`, additive (0.0.11 and 0.0.12 ignore it, so a rollback still works). The
+  ingester creates it at startup with `CREATE INDEX IF NOT EXISTS`, so a fresh database and an existing one
+  both get it (about 0.5 s on 300,000 rows; WAL readers keep reading meanwhile); the read-only API never
+  creates it and answers correctly, only slower, until it exists.
+- `crates/store` page query: several `kinds` (no `gate`) run one bounded `events_kind` seek per kind, merged
+  by id, because a single `kind IN (…)` query makes SQLite walk the whole stream to avoid a sort; with a
+  `gate` the kinds only filter the gate's rows (`events_gate`, as before). Repeated kinds are ignored.
+  Responses are unchanged.
+- Measured on 300,000 rows (release build, one thread): a page for a rare kind 8 pages/s before, about
+  33,000 after; two kinds, one rare, about 9,000.
+
 ## [0.0.12] - 2026-10-19
 
 ### Changed

@@ -198,7 +198,10 @@ impl From<rusqlite::Error> for BindError {
     }
 }
 
-/// The schema of `src/store.ts` (0.0.4–0.0.11), unchanged: same STRICT tables, columns and indexes.
+/// The schema of `src/store.ts` (0.0.4–0.0.11): same STRICT tables, columns and indexes, plus
+/// `events_kind` (0.0.13, additive: the earlier writers ignore it). Every statement is `IF NOT EXISTS`,
+/// so the ingester (the only process that runs this) upgrades an older database on its next start; the
+/// read-only API never creates an index and still answers, only slower, until the ingester has.
 pub const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT;
 CREATE TABLE IF NOT EXISTS cursors (stream TEXT PRIMARY KEY, cursor TEXT) STRICT;
@@ -218,6 +221,8 @@ CREATE TABLE IF NOT EXISTS events (
 ) STRICT;
 CREATE INDEX IF NOT EXISTS events_stream ON events (stream, id);
 CREATE INDEX IF NOT EXISTS events_gate ON events (stream, gate_id, id);
+-- A `kinds` filter for a rare kind reads that kind's rows, not the stream (F25).
+CREATE INDEX IF NOT EXISTS events_kind ON events (stream, kind, id);
 -- Counters maintained inside the ingest transaction, so serving a page never scans a stream.
 CREATE TABLE IF NOT EXISTS stream_stats (
   stream TEXT PRIMARY KEY,
@@ -721,29 +726,76 @@ impl Reader {
     }
 }
 
+const PAGE_COLUMNS: &str = "id, event_type, sender, bcs, checkpoint, tx_digest, event_index";
+
+/// The SQL and arguments of [`read::page`] (also what the query-plan tests explain).
+pub(crate) fn page_sql(stream: Stream, q: &PageQuery) -> (String, Vec<rusqlite::types::Value>) {
+    use rusqlite::types::Value;
+    // Distinct kinds: a repeated one would return its rows twice from the merged seeks.
+    let mut distinct: Vec<&String> = Vec::new();
+    for k in q.kinds.iter().flatten() {
+        if !distinct.contains(&k) {
+            distinct.push(k);
+        }
+    }
+    let kinds = Some(distinct.as_slice()).filter(|k| !k.is_empty());
+    let take = i64::from(q.limit + 1);
+    let mut args: Vec<Value> = Vec::new();
+    if let (Some(kinds), None) = (kinds, &q.gate_id)
+        && kinds.len() > 1
+    {
+        // One bounded, ordered seek per kind, merged: cost O(kinds x limit), independent of history.
+        let mut arms = Vec::with_capacity(kinds.len());
+        for k in kinds {
+            let mut arm = format!("SELECT * FROM (SELECT {PAGE_COLUMNS} FROM events WHERE stream = ? AND kind = ?");
+            args.push(stream.as_str().to_owned().into());
+            args.push((*k).clone().into());
+            if let Some(b) = q.before_id {
+                arm.push_str(" AND id < ?");
+                args.push(b.into());
+            }
+            arm.push_str(" ORDER BY id DESC LIMIT ?)");
+            args.push(take.into());
+            arms.push(arm);
+        }
+        args.push(take.into());
+        return (format!("{} ORDER BY id DESC LIMIT ?", arms.join(" UNION ALL ")), args);
+    }
+    let mut sql = format!("SELECT {PAGE_COLUMNS} FROM events WHERE stream = ?");
+    args.push(stream.as_str().to_owned().into());
+    if let Some(kinds) = kinds {
+        // With a gate the kind is a plain row filter (`+kind`, see `read::page`).
+        let col = if q.gate_id.is_some() { "+kind" } else { "kind" };
+        sql.push_str(&format!(" AND {col} IN ({})", vec!["?"; kinds.len()].join(", ")));
+        args.extend(kinds.iter().map(|k| Value::from((*k).clone())));
+    }
+    if let Some(g) = &q.gate_id {
+        sql.push_str(" AND gate_id = ?");
+        args.push(g.clone().into());
+    }
+    if let Some(b) = q.before_id {
+        sql.push_str(" AND id < ?");
+        args.push(b.into());
+    }
+    sql.push_str(" ORDER BY id DESC LIMIT ?");
+    args.push(take.into());
+    (sql, args)
+}
+
 /// Queries both connections run. None of them scans a stream: counters are maintained at ingest.
 mod read {
     use super::*;
 
+    /// One page, newest first. Which index serves it is part of the cost model (checked by the
+    /// query-plan tests):
+    /// - no filter, or only `before`: `events_stream`;
+    /// - `gate` (with or without `kinds`): `events_gate`; `kinds` is then only a row filter (`+kind`
+    ///   keeps the planner off `events_kind`, which would walk a common kind to find one gate's rows);
+    /// - one kind: `events_kind`;
+    /// - several kinds: one `events_kind` seek per kind (at most `limit + 1` rows each), merged by id,
+    ///   because a single `kind IN (…)` query makes SQLite walk the whole stream to avoid a sort.
     pub fn page(conn: &Connection, stream: Stream, q: &PageQuery) -> rusqlite::Result<Page> {
-        let mut sql = String::from(
-            "SELECT id, event_type, sender, bcs, checkpoint, tx_digest, event_index FROM events WHERE stream = ?",
-        );
-        let mut args: Vec<rusqlite::types::Value> = vec![stream.as_str().to_owned().into()];
-        if let Some(kinds) = q.kinds.as_ref().filter(|k| !k.is_empty()) {
-            sql.push_str(&format!(" AND kind IN ({})", vec!["?"; kinds.len()].join(", ")));
-            args.extend(kinds.iter().map(|k| k.clone().into()));
-        }
-        if let Some(g) = &q.gate_id {
-            sql.push_str(" AND gate_id = ?");
-            args.push(g.clone().into());
-        }
-        if let Some(b) = q.before_id {
-            sql.push_str(" AND id < ?");
-            args.push(b.into());
-        }
-        sql.push_str(" ORDER BY id DESC LIMIT ?");
-        args.push(i64::from(q.limit + 1).into());
+        let (sql, args) = page_sql(stream, q);
         let mut stmt = conn.prepare_cached(&sql)?;
         let mut rows: Vec<EventRow> = stmt
             .query_map(rusqlite::params_from_iter(args), |r| {
@@ -814,5 +866,7 @@ mod read {
     }
 }
 
+#[cfg(test)]
+mod index_tests;
 #[cfg(test)]
 mod tests;

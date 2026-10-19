@@ -86,10 +86,15 @@ All routes are `GET` (and `HEAD`), and responses are JSON with `Access-Control-A
   `gap`; the events in between are gone for good.
 - **Counters.** Coverage, gate stats and commission are maintained at ingest, so serving a page never
   reads a whole stream for them.
+- **Indexes.** `events_stream (stream, id)` serves unfiltered pages, `events_gate (stream, gate_id, id)` serves
+  every `gate=` page (with or without `kinds`), and `events_kind (stream, kind, id)` serves `kinds` pages
+  (one seek per kind, merged), so a rare kind costs its own rows, not the stream's. The ingester creates
+  `events_kind` at startup (`CREATE INDEX IF NOT EXISTS`) in an older database, once (about 0.5 s for 300,000
+  rows; the API keeps reading meanwhile, and answers correctly, only slower, if it starts first).
 - **Chain identity.** At startup the node's chain identifier must match `NETWORK` (testnet, mainnet).
 - **Liveness.** `ingest --healthcheck` exits 0 while the ingester refreshed `meta ingest:alive` within
   `5 × POLL_MS + 30 s`; it is the container's exec probe (distroless has no shell).
-- **Upgrade from 0.0.11 (TypeScript).** Same schema, generation and cursor encoding: no reindex. The first
+- **Upgrade from 0.0.11 (TypeScript).** Same tables, generation and cursor encoding: no reindex (0.0.13 adds one index, see Indexes; 0.0.11 ignores it). The first
   start copies the old database to `<DB_PATH>.bak-pre-rust-<ms>` and records `meta schema_writer = rust`.
 - **Image contents.** `/app/api`, `/app/ingest`, `Cargo.lock` (for scanners), `THIRD_PARTY_LICENSES-api.txt`
   and `THIRD_PARTY_LICENSES-ingest.txt` (cargo-about) and `LICENSE`.
