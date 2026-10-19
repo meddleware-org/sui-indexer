@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.12] - 2026-10-19
+
+### Changed
+
+- **BREAKING (internal): rewritten in Rust; the HTTP API is unchanged.** Backend services are not written in
+  JavaScript/TypeScript (maintainer rule). A Cargo workspace replaces the Node.js bundle:
+  - `crates/store` — the SQLite schema, writes and reads (`rusqlite`, bundled SQLite); the schema, pragmas,
+    meta keys, generation, counters and the one-time counter backfill are those of 0.0.11;
+  - `crates/ingest` → `/app/ingest`, the **sole writer**: `ListEvents` over gRPC through Mysten's
+    `sui-rpc` 0.4.0, ascending from the stored cursor, 50 events a page, at most 20 pages per stream per poll,
+    30 s per request, page and cursor in one transaction, pruned-cursor gap recovery, package binding with
+    `REINDEX_CONFIRM` and a `VACUUM INTO` backup, chain-identity check, `POLL_MS` loop, clean SIGTERM;
+  - `crates/api` → `/app/api`: hyper, no web framework; opens the database **read-only** (`SQLITE_OPEN_READ_ONLY`
+    and `PRAGMA query_only`) and has no chain access. Every route, status, body, header, ETag/304 rule,
+    canonical 301, rate limit and timeout of 0.0.11 is ported; responses are byte-identical to 0.0.11's
+    (checked against the live instance).
+- **Two processes.** One image runs as two containers of one pod (workspace `post-bootstrap/sui-indexer`):
+  the API's volume is mounted read-only, so a compromised API cannot write the index, and each side restarts
+  on its own. `/healthz` reads the ingester's per-stream heartbeat rows (`meta poll:<stream>`, same 5 ×
+  `POLL_MS` rule and JSON). Before the ingester has created the database the API answers `503` (and
+  `/readyz` 503).
+- **"One parser" without decoding.** The ingester derives `kind` from the event type and `gate_id` /
+  `commission_mist` from the full node's `json` rendering; it stores the BCS bytes unchanged and never decodes
+  them (the client packages do). Checked against the 0.0.11 path (the client parsers on the BCS) on every
+  testnet event of the current and two earlier packages: 19/19 identical, and the same ledger cursor.
+- **Data continuity.** Same schema, generation and cursor encoding (base64 of the watermark cursor bytes): an
+  existing database continues without a reindex and old cursors keep paging. On its first start against a
+  database written by 0.0.11 the ingester copies it to `<DB_PATH>.bak-pre-rust-<ms>` (`VACUUM INTO`) before
+  writing, and records `meta schema_writer = rust`.
+- The runtime image is `gcr.io/distroless/cc-debian13:nonroot` (uid 65532) with `/app/api` (default command)
+  and `/app/ingest`; release binaries are 2.9 MB and 5.7 MB. Measured: about 5 MB RSS idle and 8 MB at
+  ~18k req/s for the API (0.0.11: about 110 MB at 3.5k req/s), 8 MB for the ingester.
+
+### Added
+
+- The API serves at most 1024 connections at once and buffers at most 32 KiB of request head (request
+  bodies are never read), so its memory stays bounded whatever the connection count.
+- `ingest --healthcheck`, the container's exec liveness probe (`meta ingest:alive`, refreshed around every
+  full-node request).
+- CI `rust-ci.yml`: fmt, clippy `-D warnings`, tests, coverage, cargo-deny, MSRV (1.88), the client-contract job
+  (the published `@meddleware/access-gate-client` and `@meddleware/seal-client` against the built `api`
+  binary; test tooling only), licence notices (cargo-about), Trivy configuration and image scans, and a
+  two-container smoke test (read-only API mount).
+- The release attests a CycloneDX SBOM per binary (cargo-cyclonedx), checked against the `Cargo.lock`
+  dependency graph by `scripts/check-sbom.sh` (bash + jq), next to the image's SPDX SBOM.
+
+### Removed
+
+- `package.json`, the lockfile, the TypeScript sources and tests, ESLint/TypeScript/Vitest configuration,
+  `node-ci.yml`, `scripts/check-sbom.mjs` and `scripts/third-party-licenses.mjs` (git history keeps them).
+
 ## [0.0.11] - 2026-10-19
 
 ### Changed

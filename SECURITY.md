@@ -12,15 +12,18 @@ The `sui-indexer` service source and image. Out of scope: the Sui full node, the
    it can be checked against a full node.
 2. **No secrets.** It reads public chain data. There are no keys, tokens or credentials.
 3. **Read-only surface.** Only GET, HEAD and OPTIONS. Input is validated strictly, and SQL is
-   parameterised.
+   parameterised. The API process opens the database read-only (`SQLITE_OPEN_READ_ONLY`,
+   `PRAGMA query_only`) from a read-only mount and has no chain access; only the separate ingester
+   process writes the index.
 4. **Bounded cost.**
    - Per-IP token buckets on `CF-Connecting-IP`, behind the Cloudflare cache and rate-limit rule.
-   - Request and header timeouts.
+   - Request and header timeouts; at most 1024 open connections and a 32 KiB request head.
    - Page size limits.
 5. **Least privilege.**
-   - The image is distroless, runs as nonroot and has no shell.
-   - The pod has a read-only root filesystem and all capabilities dropped. Only the data volume is
-     writable.
+   - The image is distroless, runs as nonroot and has no shell. The services are Rust; the one
+     `unsafe` call (keeping SQLite's WAL files on close) is documented in the source.
+   - The pod has a read-only root filesystem and all capabilities dropped. Only the ingester's mount of
+     the data volume is writable.
 
 `CF-Connecting-IP` is trusted because the service is reachable only through the Cloudflare tunnel.
 If it is ever exposed directly, the header can be forged to dodge the per-IP limit.

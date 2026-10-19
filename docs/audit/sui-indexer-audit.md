@@ -1,6 +1,6 @@
 # Security Audit — `sui-indexer`
 
-**Classification:** Internal security review (re-verified 2026-10-09; code gates closed 2026-10-18 — awaiting external review)
+**Classification:** Internal security review (re-verified 2026-10-09; code gates closed 2026-10-18; re-verified 2026-10-19 against the Rust rewrite 0.0.12 — awaiting external review)
 **Project:** sui-indexer — a lean read-indexer for display data.
 
 - It polls two streams from a Sui full node over gRPC into SQLite (WAL):
@@ -10,22 +10,32 @@
 - Apps (treasury-ui activity, seal-ui discovery) read history from it when `VITE_INDEXER_URL` is set,
   and fall back to the full node otherwise.
 
-**Project type:** TS service (Node 24 `node:http` + `node:sqlite`, one esbuild bundle) + container
-image.
+**Project type:** Rust service (from 0.0.12: a Cargo workspace with two binaries, `ingest` — the sole
+SQLite writer — and `api` — read-only, `hyper` — in one image, run as two containers of one pod) +
+container image. Up to 0.0.11 it was a TS service (Node `node:http` + `node:sqlite`, one esbuild bundle);
+the findings keep their TS-era text and carry a 2026-10-19 re-verification against the Rust code.
 **Template:**
 
 - AUDIT_TEMPLATE.md (2026-10-08)
-- AUDIT_TEMPLATE_TS.md (2026-10-08)
+- AUDIT_TEMPLATE_RUST.md (2026-10-08) — from 0.0.12 (the service is Rust)
 - AUDIT_TEMPLATE_SUI_CLIENT.md (2026-10-08) — chain reads: event filters, package IDs, type matching
 - AUDIT_TEMPLATE_IMG.md (2026-10-08) — `Dockerfile` + `docker-publish.yml` + the cluster manifests
 
 Not triggered: SUI (no Move code), SEAL, WALRUS, VUE, AUTH (no authentication: public read-only
-data), OPS (no signing or irreversible scripts), GO, RUST, WORKERS, PROXY (it serves its own data; it
+data), OPS (no signing or irreversible scripts), GO, WORKERS, PROXY (it serves its own data; it
 forwards nothing), SITE, PLATFORM (the cluster and edge are the platform's own review; this audit
-cites them).
+cites them). TS applied up to 0.0.11 (the A16–A24 rows of that era are replaced by RUST rows); from
+0.0.12 the only TypeScript is `tests/contract`, a CI-only project that runs the published client
+packages against the binary (lockfile committed, Dependabot-tracked, never shipped).
 
 **Deployment status:**
 
+- **2026-10-19: `0.0.12` (Rust rewrite) committed locally, not released or deployed.** Commits `1fcbbe9`
+  (rewrite), `76595ca`, `784250a` (CI, image, SBOM), `ddfc77d` (connection cap) and the docs commit on top of
+  `fb79cd7`. The cluster still runs `0.0.11` (`sha256:c2497d4c…5abe`, the digest in `config/images.yaml`).
+  The workspace manifests for the two-container pod are written (`post-bootstrap/sui-indexer`, decision D58)
+  but must not be applied before the 0.0.12 digest is pinned (the overlay would run the 0.0.11 image as two
+  containers). Rollout gate: Section D, pre-testnet.
 - **Current (2026-10-18): `0.0.10`, released and deployed.** Tag `v0.0.10` = `5251f38` (code gates in
   `4aab344`). Index `sha256:b3484ce42a8484383efd598a3f21d3cb7077c7e3d4b73eb0df1c740b221d8a58` on quay.io and
   Docker Hub (same digest; pinned in `config/images.yaml` and the `post-bootstrap/sui-indexer` overlay). The cosign
@@ -57,7 +67,7 @@ cites them).
   `VITE_INDEXER_URL` (`https://sui-indexer.meddleware.co.uk`). Decoding happens in access-gate-client
   (0.0.8) and seal-client (0.0.19).
 
-**Review date:** 2026-10-03; re-verified 2026-10-09 (code at `a3369bb` = tag `v0.0.9`); code gates closed in 0.0.10 (`5251f38`), released and deployed 2026-10-18
+**Review date:** 2026-10-03; re-verified 2026-10-09 (code at `a3369bb` = tag `v0.0.9`); code gates closed in 0.0.10 (`5251f38`), released and deployed 2026-10-18; re-verified 2026-10-19 against the Rust rewrite (0.0.12, local commits, not released)
 **Reviewer:** Internal review
 **Severity ceiling:** Medium.
 
@@ -75,23 +85,39 @@ added (F15–F17 RESOLVED, F18–F19 DEFERRED to the pre-mainnet gate, F20 ADJUD
 2026-10-18: F18, F20 and F21 are RESOLVED in 0.0.10, and F4 follows F18 to RESOLVED. Totals for F1–F21:
 12 RESOLVED, 3 MITIGATED, 2 ADJUDICATED, 0 ACCEPTED-RISK, 1 DEFERRED (F19, a client change), 3 Positive.
 Nothing is open without a named gate. First pass: 2026-10-03; there is no predecessor audit.
+**2026-10-19 (Rust rewrite, 0.0.12):** F1–F21 re-verified against the new code (each finding carries a
+"Re-verified 2026-10-19" note; no disposition regressed). F22–F26 added: F22 (read-only API process,
+Positive), F23 (health and liveness across two processes, RESOLVED), F24 (stored columns from the node's
+JSON rendering, ADJUDICATED with a parity gate), F25 (rare-kind filters walk the stream, pre-existing,
+DEFERRED, OQ5), F26 (no connection cap, found by the RUST lens, RESOLVED). F11's last residual (the
+infrastructure "rebuildable from the chain" wording) is fixed in the workspace manifests, so F11 is RESOLVED.
+Totals for F1–F26: 15 RESOLVED, 2 MITIGATED, 3 ADJUDICATED, 0 ACCEPTED-RISK, 2 DEFERRED (F19, F25),
+4 Positive.
 
-**Front matter (TS lens):**
+**Front matter (RUST lens, from 0.0.12):**
 
-| Field | Value |
-| --- | --- |
-| Package manager / lockfile | npm; `package-lock.json` committed |
-| Module format | ESM; bundled to `dist/main.mjs` (603 kB) by esbuild 0.28.2 |
-| Publish model | not published to npm (`private: true`); shipped as an image |
-| Runtime targets | Node ≥ 24 (image: distroless `nodejs24-debian13`, Node 24.21.0 per the 0.0.9 SBOM) |
-| Peer dependencies | none |
-| Runtime dependencies | `@meddleware/access-gate-client ^0.0.8` (0.0.8), `@meddleware/seal-client ^0.0.19` (0.0.19), `@mysten/sui ^2.33.2` (installed 2.35.0, one copy; ADR-0001 baseline `^2.33.1`) |
+**Toolchain:** `rust-version = "1.88"` (workspace; checked by the CI `msrv` job, and locally with 1.88 on
+2026-10-19); builds on stable 1.98.1   **Edition:** 2024
+**Crates published:** no (`publish = false`; shipped as an image)
+**Runtime:** tokio — `ingest`: `current_thread` (`rt`, `time`, `signal`, `macros`); `api`: `multi_thread`
+with `min(available_parallelism, 4)` workers (`net`, `time`, `signal`, `sync`)
+
+| Crate | Binary | Direct dependencies (exact pins) |
+| --- | --- | --- |
+| `sui-indexer-store` | (library) | `rusqlite =0.40.2` (`bundled` SQLite), `serde`, `serde_json`, `getrandom =0.3.4` |
+| `sui-indexer-ingest` | `/app/ingest` | `sui-rpc =0.4.0` (Mysten, Apache-2.0; tonic 0.14 + rustls `tls-ring` + webpki roots), `tonic =0.14.6`, `prost-types =0.14.4`, `tokio =1.53.3`, `base64 =0.22.1`, `bs58 =0.5.1`, `serde_json` |
+| `sui-indexer-api` | `/app/api` | `hyper =1.12.0` (http1 server), `hyper-util =0.1.21`, `http-body-util`, `bytes`, `tokio`, `serde`, `serde_json`, `base64` |
+| `sui-indexer-testkit` | `seed-fixture` (CI only) | fixtures; never in the image |
+
+Up to 0.0.11 (TS lens): npm lockfile; esbuild bundle `dist/main.mjs` (603 kB); Node ≥ 24 on distroless
+`nodejs26-debian13` (0.0.11); runtime dependencies `@meddleware/access-gate-client`, `@meddleware/seal-client`,
+`@mysten/sui`.
 
 **Front matter (SUI_CLIENT lens):**
 
 | Field | Value |
 | --- | --- |
-| Transport | gRPC (`SuiGrpcClient`), `GRPC_URL` https-only except localhost |
+| Transport | gRPC `LedgerService.ListEvents` (server streaming) and `GetServiceInfo` through `sui_rpc::Client` 0.4.0 (from 0.0.12; `SuiGrpcClient` before); `GRPC_URL` https-only except localhost |
 | Package IDs | the client packages' recorded deployments, republished 2026-10-09 (testnet `access_gate` `0xd7ddaa94…88c9`, `seal_policies` `0x0c8f7349…773d`; original-id = published-at for both, a fresh publish). Overridable by env (validated and normalised). There is no mainnet deployment yet, so a mainnet start throws unless overridden. The superseded `0xa55789…6d41` / `0x61c4aa…7e42` are immutable and no longer indexed. |
 | Network | one per instance (`NETWORK`, default `testnet`); also the API's first path segment. At startup the node's chain identifier must match `NETWORK` (0.0.5/0.0.6). |
 
@@ -99,10 +125,10 @@ Nothing is open without a named gate. First pass: 2026-10-03; there is no predec
 
 | Field | Value |
 | --- | --- |
-| Images | `quay.io/meddleware-org/sui-indexer:0.0.10@sha256:b3484ce42a8484383efd598a3f21d3cb7077c7e3d4b73eb0df1c740b221d8a58` and `docker.io/meddleware/sui-indexer:0.0.10` (same index digest, amd64 + arm64; cosign signature and two SPDX attestations verified 2026-10-18; superseded 0.0.9 was `sha256:aea58153…1704`); self-hosted mirror best-effort |
-| Base images | builder `node:24-trixie-slim@sha256:8ec5d755…cffe`; runtime `gcr.io/distroless/nodejs24-debian13:nonroot@sha256:9eeb7f58…278e` (bumped in 0.0.8 for the libssl advisories, F17) |
+| Images | `quay.io/meddleware-org/sui-indexer:0.0.10@sha256:b3484ce42a8484383efd598a3f21d3cb7077c7e3d4b73eb0df1c740b221d8a58` and `docker.io/meddleware/sui-indexer:0.0.10` (same index digest, amd64 + arm64; cosign signature and two SPDX attestations verified 2026-10-18; superseded 0.0.9 was `sha256:aea58153…1704`); self-hosted mirror best-effort. Deployed now: 0.0.11 `sha256:c2497d4c…5abe`. 0.0.12 (Rust) not yet published: a local podman build is 38.3 MB (about 15 MB compressed; 0.0.11's amd64 image is 60.4 MB compressed) |
+| Base images | 0.0.12: builder `docker.io/library/rust:1-slim@sha256:4cd82946…1ab7` (cargo-chef 0.1.78, cargo-about 0.9.2); runtime `gcr.io/distroless/cc-debian13:nonroot@sha256:e792ab3d…c1f2` (the gateway-rust pins). Up to 0.0.11: builder `node:2x-trixie-slim`, runtime distroless `nodejs2x-debian13:nonroot` (F17) |
 | Runtime user | `65532:65532` (distroless nonroot; the published 0.0.9 image config says `65532:65532`) |
-| Runtime FS | `/data` volume (SQLite, 1 Gi Longhorn RWO PVC). The manifest sets `readOnlyRootFilesystem: true`, `allowPrivilegeEscalation: false`, `capabilities.drop: [ALL]`, `runAsNonRoot` (65532), `seccompProfile: RuntimeDefault` and `automountServiceAccountToken: false`. |
+| Runtime FS | `/data` volume (SQLite, 1 Gi Longhorn RWO PVC); from 0.0.12 the `api` container mounts it read-only. The manifest sets `readOnlyRootFilesystem: true`, `allowPrivilegeEscalation: false`, `capabilities.drop: [ALL]`, `runAsNonRoot` (65532), `seccompProfile: RuntimeDefault` and `automountServiceAccountToken: false`. |
 | Deployed by | infrastructure workspace `post-bootstrap/sui-indexer` (read 2026-10-09); digest from `config/images.yaml` (`sha256:b3484ce4…8a58`, 0.0.10, since 2026-10-18; `sha256:aea58153…1704` at 0.0.9) stamped into the overlay |
 | Build args | `VERSION`, `VENDOR`, `DESCRIPTION`, `SOURCE_URL`, `DOCUMENTATION_URL`, `IMAGE_URL` — all labels; no secrets |
 
@@ -115,7 +141,28 @@ Nothing is open without a named gate. First pass: 2026-10-03; there is no predec
 
 ## Executive summary
 
-The service is 1,136 lines in seven modules (816 lines in six at the first pass):
+**2026-10-19 — Rust rewrite (0.0.12, local commits).** The TypeScript service (below) is replaced by a Cargo
+workspace; the HTTP API and the database are unchanged:
+
+| Crate / module | Role |
+| --- | --- |
+| `store` (`lib.rs`, `config.rs`, `sui.rs`, `time.rs`) | the 0.0.11 schema verbatim; `Store` (the writer: atomic page + cursor ingest, counters and their one-time backfill, confirm-gated package binding, gap reset, heartbeats, the cutover backup) and `Reader` (read-only: `SQLITE_OPEN_READ_ONLY` + `query_only`); environment → config; address/type normalisation |
+| `ingest` (`source.rs`, `decode.rs`, `ingestor.rs`, `chain.rs`, `lib.rs`, `main.rs`) | `sui-rpc` `ListEvents` with the page semantics of `@mysten/sui` `core.listEvents`; kind from the type, gate and commission from the node's JSON (no BCS decoding); poll loop, gaps, heartbeats; startup order; `--healthcheck` |
+| `api` (`handler.rs`, `query.rs`, `ratelimit.rs`, `server.rs`, `lib.rs`, `main.rs`) | routing, validation, canonical URLs, cache headers and ETags, rate limit; WHATWG-exact URL/query handling; hyper server with timeouts, a connection cap and graceful shutdown |
+| `testkit` | fixtures and `seed-fixture` (CI only) |
+
+- **Tests:** 107 Rust tests (store 32, ingest 35, api 40; 7 of them property tests), 5 client-contract tests
+  (the published client packages against the built binary), 10 SBOM-gate script cases, the two-container
+  smoke test. Line coverage 90.7% (`cargo llvm-cov`; the two `main.rs` are thin and run by the smoke test).
+- **Equivalence evidence:** every API case of 0.0.11 ported; the local `api` over a database the Rust
+  ingester built from testnet answered byte-identically to the live 0.0.11 instance for 10 routes and 6
+  error/redirect cases (modulo generation and poll time); JSON-derived vs BCS-derived columns 19/19 on every
+  testnet event of the current and two earlier `access_gate` packages; the stored cursor equals the TS
+  client's `endCursor` for the same page.
+- **Measured (4-CPU laptop):** `api` 5 MB RSS idle, 8 MB at ≈ 18k req/s on the live-sized index, 26 MB peak
+  and ≈ 14k req/s (head page) on a 300k-row index; `ingest` 8 MB; binaries 2.9 MB / 5.7 MB.
+
+The TypeScript service (0.0.4–0.0.11) was 1,136 lines in seven modules (816 lines in six at the first pass):
 
 | Module | Role |
 | --- | --- |
@@ -127,7 +174,7 @@ The service is 1,136 lines in seven modules (816 lines in six at the first pass)
 | `chain` | maps the node's chain identifier to the short id |
 | `main` | wiring, startup refusals |
 
-There are 52 tests in five files (30 at the first pass; 47 at 0.0.9).
+There were 52 tests in five files at 0.0.10 (30 at the first pass; 47 at 0.0.9).
 
 **Re-verification 2026-10-09 (code `a3369bb` = `v0.0.9`).** The first-pass findings were fixed in 0.0.5
 (2026-10-08) and the follow-up releases 0.0.6–0.0.9; the CHANGELOG lists them and each finding below
@@ -183,12 +230,12 @@ cites the commit and the test that pins it.
 
 | Disposition | Findings |
 | --- | --- |
-| RESOLVED | F1 (full-stream scans), F4 and F18 (SBOM of the bundled npm packages, 0.0.10), F5 (licence notices), F6 (cache key and limiter), F9 (casts, ETags), F10 (CI and image pipeline), F15 (pruned-cursor wedge), F16 (chain-identity startup bug), F17 (libssl advisories in the base image), F20 (operator-keyed lookups use `Map`s, 0.0.10), F21 (`noUncheckedIndexedAccess` on, 0.0.10) |
-| MITIGATED | F2 (stuck ingest; clients ignore `polledAt`, see F19), F3 (history loss on config change fixed; volume loss remains), F11 (documentation drift, one residual item) |
-| ADJUDICATED | F7 (new event types need a fresh publish), F8 (display-only trust in the node; chain identity now checked) |
+| RESOLVED | F1 (full-stream scans), F4 and F18 (SBOM of the bundled code: npm in 0.0.10, Cargo per binary in 0.0.12), F5 (licence notices), F6 (cache key and limiter), F9 (casts, ETags), F10 (CI and image pipeline), F11 (documentation drift; last residual fixed 2026-10-19), F15 (pruned-cursor wedge), F16 (chain-identity startup bug; the startup path is now tested), F17 (libssl advisories in the base image), F20 (operator-keyed lookups), F21 (`noUncheckedIndexedAccess`; TS-only, superseded), F23 (health across two processes, 0.0.12), F26 (connection cap, 0.0.12) |
+| MITIGATED | F2 (stuck ingest; clients ignore `polledAt`, see F19), F3 (history loss on config change fixed; volume loss remains) |
+| ADJUDICATED | F7 (new event types need a fresh publish), F8 (display-only trust in the node; chain identity now checked), F24 (stored columns from the node's JSON rendering; parity gate) |
 | ACCEPTED-RISK | none |
-| DEFERRED | F19 (clients treat a stale head page as unavailable): pre-mainnet gate row in Section D; the change lives in access-gate-client and seal-client |
-| Positive | F12, F13, F14 |
+| DEFERRED | F19 (clients treat a stale head page as unavailable): pre-mainnet gate row in Section D; the change lives in access-gate-client and seal-client. F25 (rare-kind filters walk the stream; an additive index after the cutover, OQ5) |
+| Positive | F12, F13, F14, F22 (read-only API process) |
 
 **Posture:**
 
@@ -199,6 +246,9 @@ cites the commit and the test that pins it.
   freshness** (F19). SBOM completeness (F18) is fixed in the 0.0.10 release workflow.
 - The first pass recorded findings only; this pass records the dispositions of the fixes released
   2026-10-08/09 (see the re-verification log).
+- 2026-10-19: the Rust rewrite keeps every behaviour above and adds a process boundary — the API can no
+  longer write the index (F22). Its new trust point is the node's JSON rendering for three stored columns
+  (F24), checked against the client parsers on all live testnet events.
 
 ---
 
@@ -208,11 +258,12 @@ cites the commit and the test that pins it.
 | --- | --- | --- | --- |
 | Anonymous client (through Cloudflare) | URLs, headers, request rate | Read pages; force origin work with cache-miss URLs | Edge cache; per-IP bucket on `CF-Connecting-IP` (IPv6 by /64, bounded map); ingress limit 20 r/s; strict params; cacheable `301` to the canonical URL (F6); O(1) counters instead of scans (F1). The Cloudflare rate-limit rule is **not** set (free plan, maintainer item in the infrastructure README) |
 | Client reaching the origin off-tunnel (in-cluster pod, mis-exposed Service) | `CF-Connecting-IP` | Forge the header to dodge the per-IP limit | SECURITY.md: only via the tunnel. The NetworkPolicy (default-deny ingress) admits only the `nginx-ingress` namespace and `platform-probe` on 8080 |
-| Full node at `GRPC_URL` | the event stream | Serve fabricated or omitted events; hang | https; 30-second timeout; client parsers (type and layout); chain identifier must match `NETWORK` (F8, F16); a poison event is counted and skipped (F2). **No authenticity of rows (F8, display-only)** |
+| Full node at `GRPC_URL` | the event stream (BCS and its JSON rendering) | Serve fabricated or omitted events; a JSON rendering that disagrees with the BCS; hang | https (rustls, webpki roots); 30-second timeout per request plus the SDK's 30-second body-idle watchdog; exact type match at the original ID; strict JSON field checks, else counted as undecodable (F24); the clients decode the BCS again; chain identifier must match `NETWORK` (F8, F16). **No authenticity of rows (F8, display-only)** |
+| A compromised `api` process (from 0.0.12) | its own container | Serve wrong pages | cannot write the index: read-only mount, `SQLITE_OPEN_READ_ONLY`, `query_only` (F22); no chain access, no credentials |
 | Operator / config (`NETWORK`, `GRPC_URL`, `*_ORIGINAL_ID`, `DB_PATH`) | what is indexed | A package-ID change clears a stream | Validated and normalised IDs; startup refuses until `REINDEX_CONFIRM` names the stream; `VACUUM INTO` backup first; generation rotation (F3). The backup sits on the same volume |
 | `access_gate` / `seal_policies` publisher | event types and layouts | Add event types in an upgrade | Exact-type parsers. Upgrade-defined types are not indexed: new event types need a fresh publish (F7, decision) |
 | Consumer apps | interpretation | Treat display data as truth | Display-only invariant; the clients decode again and fall back on errors. Head pages carry `polledAt`; the clients do not use it yet (F19) |
-| Dependency and base-image authors | bundled JS; base layers | Ship vulnerable code | Lockfile; `npm audit`; digest pins; Trivy image scan before sign; lockfile and licences shipped in the image. **The SBOM attestation does not list bundled JS (F18)** |
+| Dependency and base-image authors | crates (0.0.12; bundled JS before); base layers | Ship vulnerable code | `Cargo.lock`; `cargo deny` (RustSec advisories, licences, bans, sources: crates.io only); digest pins; Trivy image scan before sign; `Cargo.lock` and licence notices in the image; a checked CycloneDX SBOM per binary (F18) |
 
 ### On-chain dependency matrix (SUI_CLIENT lens)
 
@@ -222,20 +273,26 @@ cites the commit and the test that pins it.
 | `seal_policies` package | original ID = published-at `0x0c8f7349…773d` (testnet, 2026-10-09; previously `0x61c4aa…7e42`) | `@meddleware/seal-client/deployments`, or `SEAL_ORIGINAL_ID` | filter `<id>::sealed_content::SealedContentPublished` | same | same |
 | Full node | `GRPC_URL` | env / Mysten default | event source | wrong network ⇒ refused at startup (chain identifier check, F8); a compromised node ⇒ fabricated rows (display-only) | closed at startup |
 
-### Supply chain & input matrix (TS lens)
+### Threat model — service actor matrix (RUST lens, from 0.0.12)
 
-| Actor / source | Controls | Bounded by |
+| Actor | Controls | Bounded by |
 | --- | --- | --- |
-| Dependency authors | runtime: the two clients, `@mysten/sui` (+ `@mysten/bcs`, `@noble/*`, `@protobuf-ts/*`, `@mysten/seal`); dev: esbuild (install script), eslint, typescript, vitest | lockfile; `npm ci`; `npm audit` in CI and publish; F18 |
-| Untrusted inputs | HTTP requests; full-node responses | strict params (`api.ts:63-90`); client parsers (`ingest.ts:43-66`) |
-| Embedding host | — | — |
+| Network client | request line, headers, timing (bodies are never read) | strict query/path parsing (`api/src/query.rs`, proptests), 5 s header and 10 s request timeouts, 32 KiB request head, 1024 connections (F26), per-IP limiter (A-rate limiting) |
+| Upstream service | — (the API forwards nothing) | — |
+| Sui full node (gRPC, tonic/prost through `sui-rpc`) | stream frames and payloads | generated protobuf decoding (prost; not hand-rolled), tonic's 4 MiB default message cap, one page of 51 items per request, 30 s timeout, JSON fields checked strictly (F24) |
+| Shared state store | the SQLite file on the PVC | one writer (`ingest`); the `api` is read-only (F22); WAL; `busy_timeout` 5 s |
+| Ingress / proxy in front | `CF-Connecting-IP` | trusted only because the NetworkPolicy admits nginx-ingress and platform-probe only (F6) |
+| Crate registry and build pipeline | the compiled code | `Cargo.lock`, `--locked` everywhere, `cargo deny` (sources: crates.io only), digest-pinned builder, SBOM gate (B.1, B.RS-1) |
+
+Up to 0.0.11 (TS lens): dependency authors were the two clients and `@mysten/sui` (+ `@mysten/bcs`, `@noble/*`,
+`@protobuf-ts/*`, `@mysten/seal`), bounded by the lockfile, `npm ci` and `npm audit` (F18).
 
 ### Image supply chain (IMG lens)
 
 | Actor / asset | Power | Bounded by |
 | --- | --- | --- |
 | Base-image publishers (Docker Library, Google distroless) | the base layers | digest pins (IMG-M1) |
-| Build context | files sent to BuildKit | selective `COPY` (`package*.json`, `tsconfig.json`, `src`, `scripts`); `.dockerignore` excludes `.env*`, `*.db`, `*.db-*`, `*.bak-*` (F10) |
+| Build context | files sent to BuildKit | from 0.0.12 `COPY . .` into the build stages (only the binaries, `Cargo.lock`, `LICENSE` and the notices reach the runtime stage); `.dockerignore` excludes `target`, `**/node_modules`, `.git`, `.github`, `*.md`, `.env*`, `*.db`, `*.db-*`, `*.bak-*` (F10) |
 | Build args | labels only | no secrets (IMG-M4) |
 | CI publish job | push, sign, attest | SHA-pinned actions; OIDC; full CI reused on the tagged commit; Trivy scan before sign (F10) |
 | Cluster manifests | runtime security context | `post-bootstrap/sui-indexer` read 2026-10-09: full restricted context, probes, limits, NetworkPolicy (Section B) |
@@ -248,7 +305,17 @@ Critical / High / Medium / Low / Info / Positive.
 
 ## Scope
 
-**In scope (HEAD `a3369bb` = tag `v0.0.9`; first pass `9aa3370` = `v0.0.4`):**
+**In scope 2026-10-19 (0.0.12, Rust; local commits `1fcbbe9`…`ddfc77d` on `fb79cd7`):**
+
+- `Cargo.toml`, `Cargo.lock`, `rustfmt.toml`, `deny.toml`, `about.toml`, `about.hbs`
+- `crates/store/src/{lib,config,sui,time,tests}.rs`, `crates/ingest/src/{lib,main,source,decode,ingestor,chain,tests}.rs`,
+  `crates/api/src/{lib,main,handler,query,ratelimit,server,tests}.rs`, `crates/testkit/src/{lib,main}.rs`
+- `tests/contract/` (CI-only client contract), `scripts/{smoke.sh,check-sbom.sh,tests/check-sbom-test.sh}`
+- `Dockerfile`, `.dockerignore`, `.gitignore`, `.github/workflows/{rust-ci,docker-publish}.yml`, `.github/dependabot.yml`
+- `README.md`, `CLAUDE.md`, `AGENTS.md`, `SECURITY.md`, `CHANGELOG.md`
+- workspace: `post-bootstrap/sui-indexer/{base/deployment.yaml,base/pvc.yaml,README.md}` (two containers), decision D58
+
+**In scope up to 0.0.11 (HEAD `a3369bb` = tag `v0.0.9`; first pass `9aa3370` = `v0.0.4`):**
 
 - `src/{config,store,ingest,api,ratelimit,chain,main}.ts`
 - `tests/{api,chain,config,ingest,sbom}.test.ts`, `tests/fixtures.ts`
@@ -298,6 +365,23 @@ configuration and the cluster platform (platform lens).
 | Docker Hub referrers of the 0.0.9 index | GitHub provenance (`slsa.dev/provenance/v1`), cosign signature, and the SPDX SBOM attestation (annotation still reads `cosign/sign/v1`). The SBOM has 17 packages: the 15 Debian/Node packages, the root `@meddleware/sui-indexer` and the image; **none** of the bundled npm packages (F18) |
 | Live service | `/healthz` 200 with both streams ok; coverage and gate stats as in Deployment status; `limit=05` answered `301` to `limit=5` with `max-age=86400`; head page `Cache-Control: public, max-age=10, s-maxage=30` with an ETag |
 | Coverage run | **not run** (plugin not installed); first-pass figures: 82.01% statements / 85.64% branches / 75% functions / 83.21% lines at 0.0.4 |
+
+**Environment / commands (2026-10-19, Rust rewrite; `cargo +stable` 1.98.1, Linux x86_64, 4 CPUs):**
+
+| Command | Result |
+| --- | --- |
+| `cargo fmt --check` / `cargo clippy --all-targets --locked -- -D warnings` | clean / clean |
+| `cargo test --locked` | **107 passed** (store 32, ingest 35, api 40) |
+| `cargo llvm-cov --summary-only` | lines 90.7%, functions 87.6%, regions 89.4% (`main.rs` of both binaries 0%: thin, run by the smoke test) |
+| `cargo +1.88 check --locked --workspace --all-targets` | passes (MSRV 1.88; let-chains need it) |
+| `cargo deny check` (0.20.2) | advisories ok, bans ok (duplicates warned: `getrandom`, `syn`), licenses ok, sources ok |
+| `cargo about generate --fail` (0.9.2), per binary | passes; `api` 44 crates, `ingest` 137 crates |
+| `cargo cyclonedx` (0.5.9) + `scripts/check-sbom.sh` | `api` SBOM lists all 63 crates of its graph, `ingest` all 139; a removed crate fails (`scripts/tests/check-sbom-test.sh`, 10 cases) |
+| `tests/contract` (vitest, `@meddleware/access-gate-client` 0.0.9, `@meddleware/seal-client` 0.0.20) | 5 passed against `target/release/api` |
+| `podman build` | image 38.3 MB; `DOCKER=podman bash scripts/smoke.sh` passes (two containers, API mount `:ro`) |
+| Live (read-only) | `ingest` against `fullnode.testnet.sui.io` into a scratch DB (11 events), `api` on it: 10 routes and 6 error/redirect cases identical to `https://sui-indexer.meddleware.co.uk` (generation and poll time aside); parity 19/19 (F24) |
+| Load (dev-only closed-loop client, 64 keep-alive connections, 10 s, limiter raised) | head page ≈ 18k req/s (11 rows), ≈ 14k req/s (300k rows); `gate=` filter ≈ 5.2k req/s; `kinds=AccessConsumed` on 300k rows **10 req/s** (F25) |
+| Not run | the publish workflow, cosign, Trivy, actionlint (GitHub Actions runs them); the cluster rollout |
 
 First-pass commands (2026-10-03, Node 22.22.2) are recorded in the re-verification log.
 
@@ -371,6 +455,8 @@ First-pass commands (2026-10-03, Node 22.22.2) are recorded in the re-verificati
   there is no separate benchmark test beyond the 50k-row case.
 - Live: `/v1/testnet/coverage` answers from the counters (2026-10-09).
 
+**Re-verified 2026-10-19 (0.0.12, Rust):** The counters are kept verbatim: `Store::ingest` (`crates/store/src/lib.rs`) bumps `stream_stats`, `gate_stats` and `gate_commission` in the page transaction (commission summed as `u128`, stored as decimal text), and `backfill_stats` rebuilds them once (`stats:v2`). `coverage`, `health`, `gate_stats` and `head_id` are single-row or index reads. Tests: *counters_stay_exact_across_duplicates_and_agree_with_a_recount*, *counters_are_rebuilt_…*, *coverage_over_50k_rows_is_a_constant_time_read*, *commission_totals_are_exact_beyond_64_bits*. Disposition unchanged (RESOLVED). One request shape still walks rows: a `kinds` filter for a rare kind (F25, pre-existing).
+
 ### F2 — One undecodable event halts both streams forever; stale pages give no signal
 
 **Severity:** Low   **Disposition:** MITIGATED (indexer side RESOLVED in 0.0.5, `1973fca`; the clients' use of `polledAt` is F19; monitoring done 2026-10-09)
@@ -441,6 +527,8 @@ First-pass commands (2026-10-03, Node 22.22.2) are recorded in the re-verificati
   unavailable by the apps. Tracked as F19. A stuck ingest is now visible on the status page and in
   `/healthz`, but the apps still show the stale history until the indexer recovers.
 
+**Re-verified 2026-10-19 (0.0.12, Rust):** Independent streams (`Ingestor::poll_one` per stream), count-and-skip (`stream_stats.undecodable`, `UNDECODABLE` log line) and the freshness fields are ported. What counts as undecodable changed with the decoding (F24): a recognised event whose JSON rendering lacks a valid `gate_id`/`commission_mist`, or that has no BCS, digest or index. Tests: *skips_and_counts_an_undecodable_event_…*, *a_recognised_event_without_what_the_row_needs_is_undecodable*, *polls_the_streams_independently_…*. `/healthz` now reads the per-stream heartbeat rows the ingester writes (F23). Disposition unchanged (MITIGATED; F19 open).
+
 ### F3 — Clearing a stream permanently loses history the full node has pruned
 
 **Severity:** Low   **Disposition:** MITIGATED (the destructive-clear path RESOLVED in 0.0.5, `1973fca`, OQ1 decided; volume loss remains a maintainer/platform item)
@@ -506,6 +594,8 @@ then becomes hard to find, although the on-chain events remain where the node ke
   `OPERATOR_TASKS.md` row for it yet (OQ4). Accepted for testnet, because the index is display-only and
   the apps fall back to the node for the recent window.
 
+**Re-verified 2026-10-19 (0.0.12, Rust):** `Store::bind_packages` keeps the refusal (`PackageChangedError` until `REINDEX_CONFIRM`), the `VACUUM INTO <DB_PATH>.bak-<ms>` copy, the clear and the generation rotation; `start()` exits non-zero with "refusing to start". Tests: the six *Store.bindPackages* cases ported, plus *start_refuses_a_package_change_until_confirmed_then_backs_up_and_reindexes* (process wiring). New: the first start of 0.0.12 on a 0.0.11 database writes `<DB_PATH>.bak-pre-rust-<ms>` before writing anything (*backs_up_an_earlier_writers_database_once_before_marking_it*, *start_backs_up_a_database_of_the_previous_indexer_once*). That copy also sits on the 1 Gi volume and doubles the database for as long as it is kept (the live index is tens of kB, so this is not a space risk now). Volume loss remains the platform item; disposition unchanged (MITIGATED).
+
 ### F4 — The image SBOM omits every bundled npm dependency
 
 **Severity:** Low   **Disposition:** RESOLVED (lockfile and licences shipped in 0.0.5, `1973fca`; the SBOM of the bundle is F18, 0.0.10, commit `4aab344`)
@@ -554,6 +644,8 @@ finds JS packages through `package.json` and lockfiles, and a bundle has neither
 - **Resolved 2026-10-18 (0.0.10, commit `4aab344`):** the release now attests a second SPDX SBOM generated
   from the lockfile (F18).
 
+**Re-verified 2026-10-19 (0.0.12, Rust):** The bundle is gone. From 0.0.12 the image ships `Cargo.lock` in `/app` (for image scanners) and the release attests one CycloneDX SBOM per binary (F18). Disposition unchanged (RESOLVED).
+
 ### F5 — The bundle and image ship no third-party licence notices
 
 **Severity:** Low   **Disposition:** RESOLVED (0.0.5, `1973fca`)
@@ -599,6 +691,8 @@ finds JS packages through `package.json` and lockfiles, and a bundle has neither
   (`@mysten/bcs`, `@mysten/seal`, `@mysten/utils`, `poseidon-lite`); the notice records their declared
   licence and the Apache-2.0 text is present through the sibling packages. The script's `--check` only
   requires `@mysten/sui` to be present, so a future package without a licence file would not fail CI.
+
+**Re-verified 2026-10-19 (0.0.12, Rust):** Licence notices are generated by cargo-about 0.9.2 (`about.toml`, `about.hbs`) per binary, in the Dockerfile's `notices` stage (`--fail` on an unaccepted licence) and shipped as `/app/THIRD_PARTY_LICENSES-{api,ingest}.txt`; CI builds that stage and checks both files for the Apache-2.0 text. Every crate in the graph has a recognised licence (no clarifications needed; `ring` uses the cargo-about workaround). This also closes the 0.0.5 residual that a package without a licence file would not fail CI. Disposition unchanged (RESOLVED).
 
 ### F6 — Non-canonical URLs bypass the edge cache; per-IP limit weaknesses
 
@@ -658,6 +752,8 @@ The edge rate rule (not in this repo) is the remaining bound.
 - Not set: the Cloudflare zone rate-limit rule (free plan, one rule used for the token service;
   documented in the infrastructure README). The edge cache and the ingress limit bound the load.
 
+**Re-verified 2026-10-19 (0.0.12, Rust):** `canonical_query`/`canonical_path` (`crates/api/src/query.rs`) reproduce `URLSearchParams` parsing, serialisation and `set` semantics exactly (proptests: round trip, idempotence — no 301 loops — unique keys, path idempotence); `client_key` keys IPv6 by /64 and the limiter evicts the least recently used bucket past 50,000. Tests: all canonical-URL and transport cases of 0.0.11 ported. Live comparison: `limit=05` and an upper-case stats path get the same 301 `Location` as 0.0.11. Disposition unchanged (RESOLVED).
+
 ### F7 — Event types introduced by a future package upgrade are never indexed
 
 **Severity:** Info   **Disposition:** ADJUDICATED (decision: new event types need a fresh publish; documented in `ef68727`, released with 0.0.7)
@@ -687,6 +783,8 @@ the access-gate-client audit (exact-type matching at the original ID).
   and the CHANGELOG (`ef68727`).
 - Revisit for mainnet: if mainnet packages are ever upgraded to add events, the clients' deployment
   records need the type-origin IDs and the indexer one filter per origin.
+
+**Re-verified 2026-10-19 (0.0.12, Rust):** Unchanged by design: `kind_of` (`crates/ingest/src/decode.rs`) accepts only types at the stream's **original** id and module, and `stream_filter` asks for `<original id>::access_gate` / the one sealed-content type. Disposition unchanged (ADJUDICATED).
 
 ### F8 — The full node is trusted completely; its chain identity is not checked
 
@@ -724,6 +822,8 @@ the access-gate-client audit (exact-type matching at the original ID).
   apps. A compromised node can still inject fabricated `SealedContentPublished` pointers (cross-ref
   seal-client F6).
 
+**Re-verified 2026-10-19 (0.0.12, Rust):** `start()` (`crates/ingest/src/lib.rs`) reads `GetServiceInfo.chain_id` within 30 s and refuses a mismatch or an unreadable identifier; rows remain unauthenticated (display-only). The new trust in the node's JSON rendering is F24. Tests: *start_refuses_a_node_of_another_chain*, `chain.rs` tests. Disposition unchanged (ADJUDICATED).
+
 ### F9 — Type casts hide SDK drift; weak-ETag revalidation; config edges
 
 **Severity:** Info   **Disposition:** RESOLVED (0.0.5, `1973fca`; one benign cast remains)
@@ -756,6 +856,8 @@ the access-gate-client audit (exact-type matching at the original ID).
   *revalidates with weak, listed or wildcard If-None-Match*.
 - **`NETWORK`.** Still free-form; unknown networks without `GRPC_URL` throw, networks without a
   deployment throw from the client's lookup (fail closed). See F20 for prototype-named values.
+
+**Re-verified 2026-10-19 (0.0.12, Rust):** No casts exist any more: the source contract is the `EventSource` trait implemented by `GrpcSource` over the generated `sui-rpc` client (type-checked by rustc), and its frame-to-page semantics are pinned by unit tests, a proptest and a local LedgerService stub; ETag matching (`etag_matches`) keeps weak, listed and `*` values. Disposition unchanged (RESOLVED).
 
 ### F10 — CI and image pipeline gaps
 
@@ -811,9 +913,11 @@ the access-gate-client audit (exact-type matching at the original ID).
   SBOM attestation's referrer annotation still reads `cosign/sign/v1` (verified on 0.0.9; a cosign quirk).
   The completeness of the SBOM is F18.
 
+**Re-verified 2026-10-19 (0.0.12, Rust):** `rust-ci.yml` replaces `node-ci.yml`: fmt, clippy `-D warnings`, tests, coverage, cargo-deny, the SBOM gate, MSRV, the client-contract job, Trivy config scan, licence notices, image build, Trivy image scan and the two-container smoke test (`scripts/smoke.sh`, now also checking the read-only API mount, the `503` before the database exists, the exec healthcheck and serving after the ingester stops). The release reuses it (`verify: uses: ./.github/workflows/rust-ci.yml`); the tag is compared with the Cargo workspace version. Every action stays SHA-pinned (pins copied from gateway-rust and the previous workflows). Disposition unchanged (RESOLVED).
+
 ### F11 — Documentation drift
 
-**Severity:** Info   **Disposition:** MITIGATED (most items fixed; one residual outside this repo, listed below)
+**Severity:** Info   **Disposition:** RESOLVED (2026-10-19: the last residual, the infrastructure retention wording, is fixed in the workspace manifests; MITIGATED before)
 
 - CLAUDE.md "Strict input … stops cache-busting parameters" overstates it (F6).
 - README "About 110 MB RSS at 3.5k req/s on a laptop" should state the database size (F1).
@@ -843,6 +947,8 @@ the access-gate-client audit (exact-type matching at the original ID).
   fixed 2026-10-18 (the items now sit under 0.0.7); the infrastructure wording is outside this repo and
   stays open (one residual item).
 
+**Re-verified 2026-10-19 (0.0.12, Rust):** The docs are rewritten for Rust (README, CLAUDE.md, AGENTS.md, SECURITY.md, CHANGELOG). The last residual — the infrastructure PVC comment and README saying the index is "rebuildable from the chain" — is fixed in the workspace (`post-bootstrap/sui-indexer/base/pvc.yaml` and README now state the node's ~5½-day retention). **Disposition: RESOLVED** (2026-10-19; workspace files, which are not under git).
+
 ### F12 — Positive: ingest ordering, atomicity and generation semantics are sound
 
 **Severity:** Positive
@@ -867,6 +973,8 @@ the access-gate-client audit (exact-type matching at the original ID).
 rule are unchanged; the stored cursor now also survives the node's retention (a counted gap, F15); the
 binding check is stricter (F3). The 2026-10-09 rebind of both streams to the new packages kept the
 rule: the generation rotated (`e32e37afbbe9` live) and older cursors return `410`.
+
+**Re-verified 2026-10-19 (0.0.12, Rust):** Ascending reads from the stored cursor, page + cursor in one transaction (`Store::ingest`), `INSERT OR IGNORE`, a missing end cursor keeping the position, the 20-page budget and the 30 s per-request timeout are ported (`Ingestor::poll_stream`). The cursor encoding is unchanged — base64 of the watermark cursor bytes with `core.listEvents`' page rules (`PageBuilder`) — verified live: the Rust source and `@mysten/sui` 2.36 return the same `endCursor` (`KAFCDginh429ARDNzazFDxgA`) for the same page. Positive stands.
 
 ### F13 — Positive: a small, strict public API
 
@@ -895,6 +1003,8 @@ and wildcard revalidation (F9), per-stream `/healthz`, `polledAt` and `latestChe
 (F2), and the `/coverage` counters. Live responses carry `nosniff`, `Access-Control-Allow-Origin: *` and
 the documented cache headers.
 
+**Re-verified 2026-10-19 (0.0.12, Rust):** Every route, status, body (byte-identical key order), header and timeout is ported (`crates/api/src/handler.rs`, `server.rs`); bigints are decimal strings (`u128` commission). New: the API cannot write (F22), a connection cap (F26), and `503` until the database exists. Positive stands.
+
 ### F14 — Positive: image hardening and release attestations
 
 **Severity:** Positive
@@ -918,6 +1028,8 @@ the documented cache headers.
   deployed overlay. Referrers on Docker Hub: cosign signature, GitHub build-provenance attestation and the
   signed SPDX SBOM attestation (the SBOM's content: F18). The release now runs the full CI, scans the
   published image before signing and prints an identity-pinned `cosign verify`.
+
+**Re-verified 2026-10-19 (0.0.12, Rust):** 0.0.12: builder `rust:1-slim` and runtime `distroless/cc-debian13:nonroot` pinned by digest; `USER 65532:65532`; only the two binaries, `Cargo.lock`, `LICENSE` and the notices reach the runtime stage; `cargo build --locked`; release profile with overflow checks and `panic = "abort"`. The release keeps multi-arch, cosign keyless signing, BuildKit provenance, the GitHub provenance attestation, the syft image SBOM and the digest-preserving `mirror-private`, and replaces the npm SBOM with per-binary Cargo SBOMs (F18). Not yet exercised on a release. Positive stands.
 
 ### F15 — A stream whose cursor falls below the node's retention retried forever (found and fixed after the first pass)
 
@@ -944,6 +1056,8 @@ the documented cache headers.
 - The events between the old cursor and the node's earliest data are gone for good; the counter makes the
   loss visible.
 
+**Re-verified 2026-10-19 (0.0.12, Rust):** Ported: `is_pruned` (same three phrases, case-insensitive) and `Store::reset_cursor_after_gap` (cursor deleted, gap counted, `meta gap:<stream>` with an ISO time and the first 200 UTF-16 units of the reason, as before). Tests: *restarts_from_the_nodes_earliest_data_…*, *does_not_swallow_other_failures_as_a_gap*, *a_pruned_message_without_a_stored_cursor_is_a_plain_failure*, and the gRPC stub returns an `OutOfRange` status that `is_pruned` recognises. Disposition unchanged (RESOLVED).
+
 ### F16 — Startup refused the real testnet node because the chain identifier was compared in the wrong form (found and fixed after the first pass)
 
 **Severity:** Low   **Disposition:** RESOLVED (0.0.6, `8573d0b`)
@@ -965,6 +1079,8 @@ the documented cache headers.
 - Residual: nothing in CI starts the bundle against a real or faked node that reports a chain id. This
   is the same gap as the container smoke test (F10) and is recorded in Section C.
 
+**Re-verified 2026-10-19 (0.0.12, Rust):** `short_chain_id` (`crates/ingest/src/chain.rs`, `bs58`) maps the real testnet and mainnet digests to `4c78adac` / `35834a8a`. The 0.0.5 residual is closed: the startup path is now tested (*start_refuses_a_node_of_another_chain* with the mainnet digest against `NETWORK=testnet`; *the_grpc_source_reads_list_events_frames_and_the_chain_identifier* through the real client), and the local run against the public testnet node passed the check. Disposition unchanged (RESOLVED).
+
 ### F17 — The distroless runtime base carried fixable `libssl3t64` HIGH advisories (found by the new scan gate, fixed in 0.0.8)
 
 **Severity:** Low   **Disposition:** RESOLVED (0.0.8, `70fa4df`)
@@ -983,6 +1099,8 @@ steps.
   The published 0.0.9 SBOM lists `libssl3t64` 3.5.7-1~deb13u3 and the release's published-image scan
   passed (the image was signed). Image scan at the review date: not re-run here (no Trivy); the gate
   passing is the evidence. The release path is the control that will catch the next advisory.
+
+**Re-verified 2026-10-19 (0.0.12, Rust):** Superseded base: 0.0.12 runs on `distroless/cc-debian13:nonroot` (the digest gateway-rust ships); the CI and release Trivy gates are unchanged and will judge it. Not scanned locally (no Trivy). Disposition unchanged (RESOLVED).
 
 ### F18 — The signed SBOM still omits the bundled npm packages
 
@@ -1018,6 +1136,8 @@ build time; the Trivy image scan may read the shipped lockfile (not verified).
   0.0.10 digest `sha256:b3484ce4…8a58` carries two SPDX attestations, the image SBOM (17 packages) and the npm
   packages SBOM (24 packages), both verified with `cosign verify-attestation --type spdxjson`.
 
+**Re-verified 2026-10-19 (0.0.12, Rust):** The release now attests, next to the syft image SBOM (SPDX), one CycloneDX SBOM per binary from `cargo cyclonedx --no-build-deps --target x86_64-unknown-linux-gnu` (0.5.9, pinned through `taiki-e/install-action`). `scripts/check-sbom.sh` (bash + jq, no Node) fails unless each SBOM lists every crate reachable from the binary's package through normal (non-dev, non-build) edges of `cargo metadata --locked`, at its locked version; it runs in CI (`check` job, with its own 10-case test script) and in the release before `cosign attest --type cyclonedx`. Local run: `api` 63/63, `ingest` 139/139. Not yet exercised on a release (post-release check: `cosign verify-attestation --type cyclonedx`). Disposition unchanged (RESOLVED).
+
 ### F19 — The clients do not use the freshness fields the indexer now serves
 
 **Severity:** Low   **Disposition:** DEFERRED (pre-mainnet gate: *clients treat a stale head page as unavailable*, Section D)
@@ -1043,6 +1163,8 @@ this repo already serves `polledAt` and `latestCheckpoint` and its contract test
 here, so the finding stays DEFERRED on those two repos. The two clients' choice of N (a multiple of the poll
 interval, 15 s by default) is theirs to make; recommendation: 4 intervals (60 s).
 
+**Re-verified 2026-10-19 (0.0.12, Rust):** Unchanged: the API still serves `polledAt` and `latestCheckpoint` (now from the heartbeat rows, F23), and the client change remains in access-gate-client and seal-client. Disposition unchanged (DEFERRED).
+
 ### F20 — Operator-keyed lookups use plain objects (found by the TS lens *Caller-keyed lookups* check)
 
 **Severity:** Info   **Disposition:** RESOLVED (0.0.10, commit `4aab344`; adjudicated hygiene, now fixed)
@@ -1065,6 +1187,8 @@ interval, 15 s by default) is theirs to make; recommendation: 4 intervals (60 s)
   rejects it). Tests: `config.test.ts` (*treats NETWORK as data*), `chain.test.ts` (*has no inherited
   entries*). No other caller-keyed plain-object lookup exists in `src/`: the stats `counts` object is keyed
   by kinds this process wrote from the client parsers, and `state[stream]` is keyed by the `Stream` union.
+
+**Re-verified 2026-10-19 (0.0.12, Rust):** Rust has no prototype lookups; the operator-keyed tables are slices searched by exact string (`DEFAULT_GRPC`, `DEPLOYMENTS`, `KNOWN_CHAIN_IDS`). Tests: *treats_network_as_data* (config) and *has_no_inherited_entries* (chain) keep the F20 cases. Disposition unchanged (RESOLVED).
 
 ### F21 — `noUncheckedIndexedAccess` is off (found by the TS lens *Compiler strictness* check, 2026-10-09)
 
@@ -1104,14 +1228,134 @@ service is display-only and the two sites are guarded.
   rather than asserted, and the shared `pages` object no longer relies on a computed string key.
   No test or rule was weakened. The flag now guards the type-check in CI and the release gate.
 
+**Re-verified 2026-10-19 (0.0.12, Rust):** Superseded: there is no TypeScript in the service. The Rust analogue — indexing without a guard — is covered by the RUST lens (A-panics): the only indexing on request paths follows a length check (`parts[3]` after `parts.len() == 5`), and `rows.last()` is an `Option`. Disposition unchanged (RESOLVED).
+
+### F22 — Positive: the API process cannot write the index (Rust rewrite, 0.0.12)
+
+**Severity:** Positive
+**Where:** `crates/store/src/lib.rs` (`Reader::open`: `SQLITE_OPEN_READ_ONLY`, `PRAGMA query_only = ON`);
+`crates/api` (no chain client, no write path); workspace `post-bootstrap/sui-indexer/base/deployment.yaml`
+(`api` mounts `/data` with `readOnly: true`).
+
+- Up to 0.0.11 one Node process held the writable database, the gRPC client and the public HTTP server. In
+  0.0.12 the HTTP server is a separate process whose database handle, mount and code have no write path:
+  three independent layers (read-only mount, read-only open flag, `query_only`). A compromise of the
+  request path can at worst serve wrong pages (display-only), not alter the index or its cursors.
+- Separate crash and restart domains: the API keeps serving while the ingester backs off or restarts, and
+  ingestion continues if the API restarts. The writer keeps the `-wal`/`-shm` files on close
+  (`SQLITE_FCNTL_PERSIST_WAL`, the one `unsafe` FFI call, justified in the source), because a read-only
+  mount cannot create them; verified by the smoke test (the API keeps answering after the ingester stops).
+- Before the ingester has created the database, the API answers `503` (`/readyz` too, so the pod is not
+  Ready) and never creates a file.
+- Tests: *the_reader_cannot_write_and_sees_new_commits*, *the_reader_is_not_ready_until_the_writer_creates_the_database*,
+  *the_wal_files_outlive_the_writer_so_a_read_only_mount_can_open_them*,
+  *before_the_ingester_creates_the_database_everything_but_options_is_503*; `scripts/smoke.sh` steps 1, 2 and 4.
+
+### F23 — Health and liveness across two processes (Rust rewrite, 0.0.12)
+
+**Severity:** Info   **Disposition:** RESOLVED (0.0.12, commit `1fcbbe9`)
+**Where:** `crates/ingest/src/ingestor.rs` (`poll_one` writes `meta poll:<stream>`; `alive` writes
+`meta ingest:alive`); `crates/api/src/handler.rs` (`healthz`, head-page `polledAt`); `crates/ingest/src/lib.rs`
+(`healthcheck`).
+
+**Issue (design consequence of the split):** `/healthz` and `polledAt` used the poller's in-memory state,
+which the API process no longer has; and a distroless container has no shell for an exec probe.
+
+**Resolution:**
+
+- The ingester writes each stream's state after every poll as `meta poll:<stream>` =
+  `{"lastSuccessAt", "lastError", "lastAttemptAt"}`; the API reads it, with the same 5 × `POLL_MS` rule and the
+  same `/healthz` JSON. The state survives an ingester restart (the 0.0.11 state reset to 0 on restart).
+  `POLL_MS` is now also read by the API (the deployment sets it on both containers).
+- `ingest --healthcheck` (the exec liveness probe) passes while `meta ingest:alive` was refreshed within
+  `5 × POLL_MS + 30 s`; the ingester refreshes it before and after every full-node request (each bounded by
+  30 s), so a stuck process fails it but a full node that is down does not (a restart would not help).
+- Tests: *polls_the_streams_independently_and_health_names_the_failing_one* (heartbeat rows),
+  *a_restart_continues_from_the_persisted_heartbeat*, *the_healthcheck_follows_the_liveness_heartbeat*, the
+  ported `/healthz` cases; smoke test step 3.
+- Residual: if the database write of a heartbeat fails, `/healthz` shows the stream stale — failing towards
+  "unhealthy", which is the safe direction.
+
+### F24 — Stored columns come from the full node's JSON rendering, not from the BCS (Rust rewrite, 0.0.12)
+
+**Severity:** Info   **Disposition:** ADJUDICATED (the "one parser" invariant kept by not decoding; a parity gate pins the equivalence)
+**Where:** `crates/ingest/src/decode.rs` (`kind_of`, `to_indexed`); `crates/ingest/src/source.rs` (`READ_MASK`
+includes `json`); CLAUDE.md "JSON fields relied on".
+
+**Issue:** the rewrite must not copy the client packages' BCS layouts ("one parser"). The three columns
+queries filter on — `kind`, `gate_id`, `commission_mist` — are therefore derived without decoding: `kind`
+from the event type's struct name, `gate_id` and `commission_mist` from the node's `json` rendering. The
+BCS bytes are stored and served unchanged, and the clients decode them as before. The node's rendering
+becomes a second input that must agree with the BCS.
+
+**Adjudication / evidence:**
+
+- The rendering uses the Move field names (`gate_id` as `0x…` hex, `u64` as a decimal string); checked against
+  `access_gate.move`, `sealed_content.move` and live testnet events (CLAUDE.md table).
+- **Parity gate (2026-10-19, read-only):** every event the testnet archive serves for `access_gate`
+  `0xd7ddaa94…` (current, 11), `0xa55789d7…` (4) and `0x1a81ca17…` (4) was run through both paths — the Rust
+  JSON derivation and 0.0.11's `toIndexed` (the client parsers on the BCS). **19/19 identical** (kinds
+  GateCreated 3, AccessMinted 7, AccessConsumed 9). No `SealedContentPublished`, `AccessBurned`,
+  `GateFrozen`, `GateMadeFree`, `PlatformConfigUpdated` or `PlatformMigrated` event exists on testnet for
+  these packages, so for those kinds the field names rest on the Move sources. The comparison script was
+  run from a scratch directory and is not kept in the tree (the TypeScript path no longer exists).
+- Strictness: an id must match `^0x[0-9a-fA-F]{1,64}$`, a `u64` must be a digit string (or an exact JSON
+  integer) that fits 63 bits; anything else makes a recognised event **undecodable** (counted and skipped,
+  F2), never a guessed value. Tests: *a_recognised_event_without_what_the_row_needs_is_undecodable* (ten
+  mutations), *keeps_kind_gate_and_commission_from_the_json_rendering*.
+- A divergence between rendering and BCS could only mis-file a row (wrong gate filter or stats), not change
+  what is served: the BCS is the node's, and the clients re-decode and type-check it (display-only, F8).
+- Lost by design: 0.0.11's strict re-encode check (a layout drift made the event undecodable at ingest).
+  Drift is now caught where the BCS is decoded — in the clients, which skip and count invalid rows.
+- Revisit: when the first sealed-content or gate-lifecycle events appear on testnet, re-run the parity
+  check (Section D, pre-mainnet).
+
+### F25 — A `kinds` filter for a rare kind walks the stream (found 2026-10-19 by the load test)
+
+**Severity:** Low   **Disposition:** DEFERRED (pre-existing in 0.0.4–0.0.11; an additive index after the 0.0.12 cutover, OQ5)
+**Where:** `crates/store/src/lib.rs` `read::page` (`WHERE stream = ? AND kind IN (…) [AND gate_id = ?]
+ORDER BY id DESC LIMIT ?`); the schema's indexes are `(stream, id)` and `(stream, gate_id, id)` only (same as
+`store.ts`).
+
+**Issue (measured):** without an index on `kind`, SQLite walks `events_stream` backwards until it has found
+`limit + 1` matching rows. For a kind that is rare in a large stream the page reads the whole stream: with
+300,000 `AccessMinted` rows and 5 `AccessConsumed`, `kinds=AccessConsumed` served **10 req/s** on 4 CPUs (the
+unfiltered head page 14k req/s). A `gate=` filter is unaffected (it uses `events_gate`). F1's counters do not
+cover this path. The same query and schema ran in every TS release.
+
+**Impact:** each such cache miss costs a stream scan; within the per-IP limit (10 r/s), the ingress limit and
+the edge cache, a handful of clients can still occupy the API's workers. Live index today: 11 rows, so no
+current effect.
+
+**Remediation (recommended, not applied):** `CREATE INDEX IF NOT EXISTS events_kind ON events (stream, kind, id)`.
+It is additive (0.0.11 ignores it, so a rollback still works) but it is a schema change, and the 0.0.12
+cutover is deliberately schema-identical; apply it in the next patch with a page-cost test for a rare kind.
+
+### F26 — The API had no connection cap (found 2026-10-19 by the RUST lens *HTTP hygiene* check)
+
+**Severity:** Info   **Disposition:** RESOLVED (0.0.12, commit `ddfc77d`)
+**Where:** `crates/api/src/server.rs` (`serve`).
+
+**Issue:** the RUST lens asks for a concurrency limit that keeps buffering × concurrency within the
+container's memory. The first Rust build (like 0.0.11) accepted connections without a cap, each with a read
+buffer of up to hyper's default ~400 KB for the request head.
+
+**Resolution:** at most `MAX_CONNECTIONS = 1024` connections are served at once (a semaphore; further ones wait
+in the listen backlog) and the request-head buffer is capped at `MAX_BUF = 32 KiB` (`max_buf_size`; larger
+heads are refused). Request bodies are never read. Worst case ≈ 32 MiB of head buffers, inside the 128 MiB
+limit. Test: *an_oversized_request_head_is_refused*; the cap itself is a constant (not load-tested).
+
 ---
 
 ## Section A — Invariant verification matrix
 
+Re-verified 2026-10-19 against the Rust code (0.0.12): file references below are the Rust ones where the
+row says so; the TS-lens rows A16–A24 are replaced by RUST-lens rows (A16–A24 now) and A38–A43 are new.
+
 | # | Invariant | Enforced at | Proven by | Status |
 | --- | --- | --- | --- | --- |
 | A1 | Display-only; rows verbatim; clients decode again and fall back | design; `serialize` | client-contract tests | HOLDS (clients do not yet use `polledAt` — F19) |
-| A2 | One parser (the client packages) | `ingest.ts` | tests | HOLDS (upgrade-defined types need a fresh publish — F7, decision) |
+| A2 | One parser (the client packages); the indexer never decodes BCS | `crates/ingest/src/decode.rs` (type name + node JSON, BCS stored verbatim) | ingest tests; client-contract job; parity 19/19 (F24) | HOLDS (upgrade-defined types need a fresh publish — F7, decision) |
 | A3 | Ledger order = row id; pages bounded by `before` immutable | `store.ts`, `ingest.ts` | ingest tests; reasoning about rowid | HOLDS |
 | A4 | Page + cursor atomic | `Store.ingest` | tests | HOLDS |
 | A5 | Generation rotates on rebuild or rebind; old cursors `410` | `Store`, `parseBefore` | tests; live generation rotated by the 2026-10-09 rebind | HOLDS |
@@ -1119,40 +1363,64 @@ service is display-only and the two sites are guarded.
 | A7 | Strict input; one cache entry per query | `api.ts` | validation and canonical-URL tests | HOLDS (F6) |
 | A8 | Cheap under load | counters; cache headers; limiter | *Store counters* (50k-row constant-time read) | HOLDS (F1) |
 | A9 | Ingest progresses despite a bad event; one stream cannot stall the other; a pruned cursor recovers | `Ingestor.pollOne` | resilience tests | HOLDS (F2, F15) |
-| A10 | Full-node calls bounded in time | `AbortSignal.timeout` | test + SDK source | HOLDS |
-| A11 | Image SBOM covers what runs | publish workflow (image SBOM + `npm sbom --omit dev` attestation) | `scripts/check-sbom.mjs`, `tests/sbom.test.ts`, CI step | HOLDS from 0.0.10 (F18; the 0.0.9 registry SBOM did not) |
-| A12 | Licence obligations met in the image | `THIRD_PARTY_LICENSES`, CI check | published image unpacked | HOLDS (F5) |
+| A10 | Full-node calls bounded in time | `tokio::time::timeout` 30 s per request (`Ingestor::poll_stream`), 30 s at startup (`CHAIN_CHECK_TIMEOUT`); the SDK's body-idle watchdog | *bounds_every_full_node_request*; *an_unreachable_node_is_an_error_not_a_hang* | HOLDS |
+| A11 | Image SBOM covers what runs | publish workflow (syft image SBOM + one CycloneDX SBOM per binary) | `scripts/check-sbom.sh` + `scripts/tests/check-sbom-test.sh` in CI and the release | HOLDS (F18; 0.0.12 not yet released) |
+| A12 | Licence obligations met in the image | `THIRD_PARTY_LICENSES-{api,ingest}.txt` (cargo-about `--fail`), CI `notices` stage | local `cargo about` run; CI | HOLDS (F5) |
 | A13 | Least privilege at runtime | Dockerfile; manifest | manifest read 2026-10-09; image config | HOLDS (non-root, read-only root FS, caps dropped, seccomp, no SA token, NetworkPolicy) |
-| A14 | The node serves the configured network | `chain.ts`, `main.ts` | `chain.test.ts`; live start | HOLDS (F8, F16); startup path not run in CI |
-| A15 | Operator-keyed lookups cannot resolve prototype members | `config.ts`, `chain.ts`, `main.ts` (`Map`s) | `config.test.ts`, `chain.test.ts` | HOLDS (F20, 0.0.10) |
-| A16 | TS — compiler strictness: `strict: true`; `noUncheckedIndexedAccess` state recorded; `skipLibCheck` does not hide own-source errors | `tsconfig.json` | `tsc --noEmit` clean with the flag on (0.0.10) | HOLDS (F21) |
-| A17 | TS — assertions at trust boundaries: casts justified; no `any`, no `eslint-disable` | `src/*.ts` | grep; F9 | HOLDS (SQLite row casts on self-written data; `config.network as 'testnet'` bound by the chain check, F9) |
-| A18 | TS — untrusted data validated: request size and shape; node events through the client parsers; fields copied into fresh literals | `api.ts` (`onlyParams`, `parseId`, `parseLimit`, `parseBefore`), `ingest.ts` (`toIndexed`) | api and ingest tests; F13 | HOLDS (HTTP bodies are never read: GET/HEAD/OPTIONS only) |
-| A19 | TS — money and integer math: commission as `bigint`; checkpoint kept as string | `store.ts` (`setReadBigInts`, `gate_commission` text) | *Store counters*; commission > 2^53 test | HOLDS |
-| A20 | TS — promise handling: no swallowed rejections on security paths | `ingest.ts` (`pollOne` records `lastError`), `api.ts:285` (`new URL` parse → `400`) | resilience tests | HOLDS (the only bare `catch {}` answers `400`) |
-| A21 | TS — network I/O: timeouts; URLs parsed, https only | `AbortSignal.timeout` 30 s (`ingest.ts:114`); `requestTimeout` 10 s, `headersTimeout` 5 s; `config.ts` https check | A10 test; config tests | HOLDS |
-| A22 | TS — encoding, secrets in output, dynamic code | `Buffer` base64 only; no secret exists in the service; generic `500`; no `eval`/`Function`/dynamic `import()` | grep (2026-10-09) | HOLDS |
-| A23 | TS — test-only code paths in production | none (no mocks or debug globals in `src/`) | grep | N/A |
-| A24 | TS — accurate comments | module comments checked against code in this pass (`main.ts` "No cast", `ingest.ts` timeout, `api.ts` `polledAt` note) | read | HOLDS |
-| A25 | SC — package-ID semantics: event filters and type prefixes use the **original** ID; one ID per use; IDs traced to the latest on-chain version | `ingest.ts:31-35,54`; B.SC-1 | client-contract tests; live head page (event type prefix `0xd7ddaa94…`) | HOLDS (upgrade-added event types are out of reach, F7 decision) |
-| A26 | SC — network / chain binding: IDs and RPC client from one `NETWORK`; node chain identifier checked; empty IDs throw | `config.ts`, `chain.ts`, `main.ts` | `chain.test.ts`, config tests; live start | HOLDS (F8, F16; `localnet` unchecked by design) |
-| A27 | SC — events: cursor paging, ascending order, pruning expected, partial failure surfaced | `ingest.ts` (`pollOne`, `PRUNED` recovery) | ingest tests (pagination, gap, independent streams) | HOLDS (F2, F15) |
-| A28 | SC — read parsing against the full normalised type; look-alike types rejected; a missing field fails closed | client parsers (`parseAccessGateEvent`, `parseSealedContentPublished`) | ingest tests; client audits | HOLDS (delegated, A2) |
-| A29 | SC — chain-access layering (ADR-0001): no inline BCS or PTB logic | `ingest.ts` calls the client parsers only | A2 | HOLDS |
+| A14 | The node serves the configured network | `crates/ingest/src/{chain,lib}.rs` (`start`) | chain tests; *start_refuses_a_node_of_another_chain*; live start against testnet | HOLDS (F8, F16; the startup path is now tested) |
+| A15 | Operator-keyed lookups cannot resolve unintended entries | `config.rs`, `chain.rs` (exact-match slices) | *treats_network_as_data*, *has_no_inherited_entries* | HOLDS (F20) |
+| A16 | RUST — memory safety: `unsafe_code = "deny"` workspace-wide; the one exception justified | `Cargo.toml` `[workspace.lints]`; `persist_wal` (`#[allow(unsafe_code)]`, one `sqlite3_file_control` call with a SAFETY comment) | clippy; read | HOLDS |
+| A17 | RUST — panics: none on attacker-reachable paths; release `overflow-checks = true`, `panic = "abort"` | request parsing validates before `parse()` (1–4 / 1–15 digits); indexing only after length checks; poisoned locks recovered with `into_inner` (the API's limiter and pool) | proptests (query parsing, page assembly); handler tests | HOLDS (the `expect`s are on startup, serialisation of owned structs and pre-validated digits) |
+| A18 | RUST — crypto-crate usage | none: no signatures, keys or MACs; TLS is rustls (`tls-ring`, webpki roots) inside `sui-rpc`/tonic | — | N/A |
+| A19 | RUST — hand-rolled decoding: bounded, property-tested | the URL/query parser (`query.rs`) is the only hand-written parser; gRPC/protobuf is generated (prost, tonic 4 MiB message cap) | 6 proptests in `query.rs`, 1 in `tests.rs` (page assembly) | HOLDS |
+| A20 | RUST — HTTP hygiene: bodies, header sizes, concurrency, outbound timeouts, https | bodies never read; 32 KiB request head; 1024 connections; 5 s / 10 s timeouts; gRPC 30 s per request, https enforced by `config.rs` | *an_oversized_request_head_is_refused*, *a_client_that_never_finishes_its_headers_is_cut_off*, config tests | HOLDS (F26) |
+| A21 | RUST — shared state: single writer; atomic page + cursor; fail closed | `Store::ingest` transaction; the `api` read-only (F22) | store tests | HOLDS |
+| A22 | RUST — rate limiting keyed on a trusted address | `CF-Connecting-IP` (trusted behind the NetworkPolicy, F6), else the peer address; IPv6 by /64 | rate-limit tests | HOLDS |
+| A23 | RUST — logging: no secrets (none exist); `Debug` of config holds no credentials | `println!` lines `<ISO> <message>`; config holds ids and URLs only | read | HOLDS |
+| A24 | RUST — graceful shutdown: SIGTERM and SIGINT; bounded drain | `ingest`: the loop stops between requests, exit 0; `api`: stop accepting, 5 s grace (`GracefulShutdown`) | *serves_over_http_and_stops_on_shutdown*, *the_loop_polls_every_interval_and_stops_on_shutdown*; smoke test (exit code 0 on SIGTERM) | HOLDS |
+| A25 | SC — package-ID semantics: event filters and type prefixes use the **original** ID; one ID per use; IDs traced to the latest on-chain version | `decode.rs` (`stream_filter`, `kind_of`); B.SC-1 | client-contract tests; live head page (event type prefix `0xd7ddaa94…`) | HOLDS (upgrade-added event types are out of reach, F7 decision) |
+| A26 | SC — network / chain binding: IDs and RPC client from one `NETWORK`; node chain identifier checked; empty IDs throw | `config.rs`, `chain.rs`, `lib.rs` (`start`) | `chain.test.ts`, config tests; live start | HOLDS (F8, F16; `localnet` unchecked by design) |
+| A27 | SC — events: cursor paging, ascending order, pruning expected, partial failure surfaced | `ingestor.rs` (`poll_one`, `is_pruned` recovery), `source.rs` (`PageBuilder`) | ingest tests (pagination, gap, independent streams) | HOLDS (F2, F15) |
+| A28 | SC — read parsing against the full normalised type; look-alike types rejected; a missing field fails closed | `kind_of` (exact address/module/struct; generic types rejected) and strict JSON fields at ingest; the client parsers on every served row | *drops_events_of_another_package_module_or_struct*; client audits | HOLDS (F24) |
+| A29 | SC — chain-access layering (ADR-0001): no inline BCS or PTB logic | the ingester decodes no BCS (A2); the testkit's BCS writer encodes fixtures only | A2; read | HOLDS |
 | A30 | SC — ABI mirroring, funds in the PTB, capabilities, execution result, signatures, dry-run, client-side publish | no PTBs, no signing, no capabilities | — | N/A (read-only indexer) |
 | A31 | IMG — base images pinned by digest, minimal runtime stage | `Dockerfile` `FROM` lines | published image | HOLDS (F14, F17) |
-| A32 | IMG — build context and reproducible build: `.dockerignore`; `npm ci`; pinned tools; multi-stage | `.dockerignore`, `Dockerfile` | F10 | HOLDS |
+| A32 | IMG — build context and reproducible build: `.dockerignore`; `--locked`; pinned tools (cargo-chef 0.1.78, cargo-about 0.9.2); multi-stage | `.dockerignore`, `Dockerfile` | F10; local podman build | HOLDS |
 | A33 | IMG — no secrets in layers or args | `Dockerfile` (labels only) | read; published image config | HOLDS |
-| A34 | IMG — runtime configuration inventory: `PORT=8080`, `DB_PATH=/data/indexer.db`; deployment sets `NETWORK`, `POLL_MS` | image `ENV`; manifest | image config; B.IMG-2 | HOLDS (nothing security-relevant is env-only) |
-| A35 | IMG — health and resources: probes on `/readyz`, requests and limits set | manifest | B.IMG-2 | HOLDS |
-| A36 | IMG — scan before sign and verification command pinned to the workflow identity | `node-ci.yml`, `docker-publish.yml` | F10, B.IMG-1 | HOLDS |
-| A37 | IMG — deployment pinned by digest from `config/images.yaml` | overlay; `verify-digests.sh` | B.IMG-2 | HOLDS |
+| A34 | IMG — runtime configuration inventory: `PORT=8080`, `DB_PATH=/data/indexer.db`; deployment sets `NETWORK`, `POLL_MS` (both containers), `PORT` and `RATE_LIMIT_*` (`api`) | image `ENV`; manifest | image config; B.IMG-2 | HOLDS (nothing security-relevant is env-only) |
+| A35 | IMG — health and resources: `api` probes on `/readyz`, `ingest` exec probe `--healthcheck`; per-container requests and limits | manifest | B.IMG-2; smoke test | HOLDS (manifest written 2026-10-19, not yet applied) |
+| A36 | IMG — scan before sign and verification command pinned to the workflow identity | `rust-ci.yml`, `docker-publish.yml` | F10, B.IMG-1 | HOLDS |
+| A37 | IMG — deployment pinned by digest from `config/images.yaml` | overlay; `verify-digests.sh` | B.IMG-2 | HOLDS (the overlay still pins 0.0.11; refresh before applying the two-container manifest — Section D) |
+| A38 | The API never writes and never creates the database | `Reader::open` (read-only flag, `query_only`), read-only mount | F22 tests; smoke test | HOLDS |
+| A39 | `/healthz` and `polledAt` reflect the ingester's real polls | heartbeat rows (`meta poll:<stream>`) | F23 tests | HOLDS |
+| A40 | Stored `kind`/`gate_id`/`commission_mist` equal what the client parsers derive from the BCS | `decode.rs` | parity 19/19 on live testnet events (F24); fixture tests | HOLDS for the kinds seen live; the other kinds rest on the Move field names |
+| A41 | Data continuity with 0.0.11: same schema, generation, cursor encoding; no reindex | `crates/store` `SCHEMA`; `PageBuilder`; `mark_rust_writer` | live cursor equality; *backs_up_an_earlier_writers_database_once_before_marking_it*; byte-identical API answers | HOLDS (rollout pending) |
+| A42 | Cutover is reversible: a copy before the first Rust write | `Store::mark_rust_writer` (`VACUUM INTO …bak-pre-rust-<ms>`) | store and wiring tests | HOLDS |
+| A43 | Request cost independent of history size for every query shape | counters (F1); indexes | load test | **DOES NOT HOLD for rare-kind filters** (F25, pre-existing; OQ5) |
 
 ---
 
 ## Section B — Supply-chain, publish-authority & capability matrix
 
 ### B.1 Dependency & CVE risk
+
+**From 0.0.12 (Rust, 2026-10-19):** `Cargo.lock` committed; `cargo deny check` (RustSec advisories — the
+database `cargo audit` reads — licences, bans, sources) clean locally and in CI (`rust-ci.yml`, the
+`EmbarkStudios/cargo-deny-action`); duplicate versions only warned (`getrandom` 0.2/0.3, `syn` 2/3). Crates on
+the security-relevant paths:
+
+| Crate | Version | Path | Notes |
+| --- | --- | --- | --- |
+| `sui-rpc` (Mysten) | =0.4.0 | gRPC client: `LedgerService.ListEvents`, `GetServiceInfo` | official sui-rust-sdk; generated protobuf (prost 0.14) and tonic 0.14; Apache-2.0 |
+| `tonic` / `prost` / `prost-types` | 0.14.6 / 0.14.4 | transport and decoding of node frames | 4 MiB default message cap |
+| `rustls` (via tonic `tls-ring`), `webpki-roots` | per lock | TLS to the full node | no OpenSSL in the image |
+| `hyper` / `hyper-util` | =1.12.0 / =0.1.21 | HTTP/1.1 server | header timeout, `max_buf_size` 32 KiB, graceful shutdown |
+| `rusqlite` (bundled `libsqlite3-sys`) | =0.40.2 | the database | SQLite compiled in; no system library |
+| `tokio` | =1.53.3 | runtime, timeouts, signals | |
+| `serde_json`, `base64`, `bs58`, `getrandom` | per lock | JSON, cursors and rows, chain ids, generations | |
+
+Dependabot tracks `cargo` (grouped minor/patch), `docker`, `github-actions`, and the CI-only `tests/contract`
+npm project. The table below is the TypeScript era (≤ 0.0.11):
 
 `npm audit --audit-level=high`: 0 (2026-10-09, again 2026-10-18). The CI Trivy image gate (fixable
 CRITICAL/HIGH) runs on every build and on the published image before signing; a local Trivy run was not
@@ -1198,22 +1466,33 @@ vitest 5 majors per the workspace decisions.
 | Actions pinned to SHAs | Yes | all `uses:` carry a SHA and a version comment |
 | Least privilege | Yes | `contents: read` default; write scopes on the public publish job only |
 | Tag ↔ version | Yes | `version` job |
-| `npm ci` + audit in CI and publish | Yes | `node-ci.yml`, reused by the release |
-| Release runs the full CI on the tagged commit | Yes | `verify: uses: ./.github/workflows/node-ci.yml` (`ef68727`) |
+| `--locked` builds + `cargo deny` in CI and publish (0.0.12; `npm ci` + audit before) | Yes | `rust-ci.yml`, reused by the release |
+| Release runs the full CI on the tagged commit | Yes | `verify: uses: ./.github/workflows/rust-ci.yml` (0.0.12; `node-ci.yml` before) |
 | Image scan before sign (published image) | Yes | `docker-publish.yml` "Scan the published image" |
 | Signature + SBOM + provenance, no `continue-on-error` on public registries | Yes | B.IMG-1 |
-| SBOM covers the bundled code | Yes, from 0.0.10 | F18 (`npm sbom --omit dev` attestation, checked by `scripts/check-sbom.mjs` in CI and the release) |
-| Config scan / container smoke test | Yes | `node-ci.yml` `image` job; `scripts/smoke.sh` |
+| SBOM covers the compiled code | Yes (0.0.10 npm; 0.0.12 Cargo per binary) | F18 (`cargo cyclonedx` attestations checked by `scripts/check-sbom.sh` in CI and the release) |
+| Config scan / container smoke test | Yes | `rust-ci.yml` `image` job; `scripts/smoke.sh` (two containers) |
+| Client contract against the shipped binary | Yes (0.0.12) | `rust-ci.yml` `contract` job (Node 26, the published client packages) |
 | actionlint | No | not run here (sibling repos run it) |
-| Dependabot | Yes | `.github/dependabot.yml` (npm, docker, github-actions; weekly, grouped) |
+| Dependabot | Yes | `.github/dependabot.yml` (cargo, npm for `tests/contract`, docker, github-actions; weekly, grouped) |
 
-### B.TS-1 Packaging
+### B.RS-1 Build & release (from 0.0.12)
+
+- `cargo fmt --check` and `cargo clippy --all-targets --locked -- -D warnings` in CI (`rust-ci.yml` `check`);
+  the declared `rust-version` (1.88) is checked by the `msrv` job (`cargo check --locked --workspace
+  --all-targets` on 1.88; also run locally 2026-10-19).
+- The image: B.IMG-1/2 (digest-pinned bases, nonroot 65532, signature, image SBOM plus per-binary Cargo SBOMs,
+  provenance).
+- No crates are published (`publish = false`), so crates.io trusted publishing does not apply.
+- Release profile: `overflow-checks = true`, `panic = "abort"`, LTO, one codegen unit, stripped.
+
+### B.TS-1 Packaging (≤ 0.0.11)
 
 Not published to npm (`private: true`). The deliverable is the image: one bundle,
 `dist/main.mjs` (603 kB), with an ESM `createRequire` banner, plus `package.json`, `package-lock.json`
 and `THIRD_PARTY_LICENSES` in `/app`.
 
-### B.TS-2 Install-time code
+### B.TS-2 Install-time code (≤ 0.0.11)
 
 | Script | Package | Reason |
 | --- | --- | --- |
@@ -1223,7 +1502,7 @@ and `THIRD_PARTY_LICENSES` in `/app`.
 There are no project lifecycle scripts and no `overrides` (`npm run licenses` and `check:licenses` are
 explicit scripts, not lifecycle hooks).
 
-### B.TS-3 Supply-chain gates
+### B.TS-3 Supply-chain gates (≤ 0.0.11)
 
 Lockfile committed; `npm ci` everywhere (including the Dockerfile, `--no-audit` there, with the
 audit in the workflow); audit at `high`, no allowlist. No npm publish.
@@ -1236,31 +1515,38 @@ audit in the workflow); audit at `high`, no allowlist. No npm publish.
 | quay.io | per workflow | per workflow | per workflow | index digest equals Docker Hub's (2026-10-09, `skopeo`); referrers not listed |
 | Self-hosted | none | none | BuildKit only | best-effort mirror |
 
+From 0.0.12 each public registry also gets two CycloneDX attestations (`--type cyclonedx`), one per binary,
+next to the syft SPDX attestation; the self-hosted mirror receives them as referrers through `oras cp`.
+
 The signer identity (Fulcio certificate SAN = this repo's `docker-publish.yml` at the tag ref) is
 checked for every deployed image by `bootstrap/images/verify-digests.sh` (16/16 on 2026-10-09). The
 command printed by the release is
 `cosign verify <image>@<digest> --certificate-identity-regexp '^https://github.com/meddleware-org/sui-indexer/\.github/workflows/docker-publish\.yml@refs/tags/v' --certificate-oidc-issuer https://token.actions.githubusercontent.com`.
 It was not re-run in this pass (cosign not installed).
 
-### B.IMG-2 Cluster manifests (`post-bootstrap/sui-indexer`, read 2026-10-09)
+### B.IMG-2 Cluster manifests (`post-bootstrap/sui-indexer`, read 2026-10-09; rewritten 2026-10-19 for 0.0.12, not yet applied)
 
 | Item | Value |
 | --- | --- |
-| Workload | 1 replica, `Recreate`, RWO PVC `sui-indexer-data` (1 Gi Longhorn); image by digest from `config/images.yaml` via the overlay |
-| Pod security | `runAsNonRoot`, uid/gid/fsGroup 65532, `seccompProfile: RuntimeDefault`, `automountServiceAccountToken: false`; container `allowPrivilegeEscalation: false`, `readOnlyRootFilesystem: true`, `capabilities.drop: [ALL]` |
-| Probes | readiness and liveness on `/readyz` (nothing sensitive); `/healthz` for monitoring only |
-| Resources | requests 20m CPU / 96 Mi; limits 500m CPU / 256 Mi |
+| Workload | 1 replica, `Recreate`, RWO PVC `sui-indexer-data` (1 Gi Longhorn); image by digest from `config/images.yaml` via the overlay. 2026-10-19: two containers from the one image — `ingest` (`/app/ingest`, rw mount, no ports) and `api` (`/app/api`, port 8080, mount `readOnly: true`); `kubectl kustomize` renders both with the overlay digest |
+| Pod security | `runAsNonRoot`, uid/gid/fsGroup 65532, `seccompProfile: RuntimeDefault`, `automountServiceAccountToken: false`; each container `allowPrivilegeEscalation: false`, `readOnlyRootFilesystem: true`, `capabilities.drop: [ALL]` (unchanged) |
+| Probes | `api`: readiness and liveness on `/readyz` (200 once the database opens); `ingest`: exec liveness `/app/ingest --healthcheck` (60 s initial delay, every 30 s, 3 failures); `/healthz` for monitoring only |
+| Resources | 0.0.12: `ingest` requests 10m / 32 Mi, limits 500m / 128 Mi; `api` requests 20m / 32 Mi, limits 500m / 128 Mi (measured RSS 5–26 MiB, README). 0.0.11: requests 20m / 96 Mi, limits 500m / 256 Mi |
 | Network | default-deny ingress; allow from the `nginx-ingress` namespace and `platform-probe` on 8080 only; Ingress rate limit 20 r/s burst 80 |
-| Runtime env | `NETWORK=testnet`, `DB_PATH=/data/indexer.db`, `POLL_MS=15000` (and the image's `PORT=8080`); no `REINDEX_CONFIRM`, no secrets |
+| Runtime env | `NETWORK=testnet`, `DB_PATH=/data/indexer.db`, `POLL_MS=15000` (both containers from 0.0.12), `PORT=8080`, `RATE_LIMIT_PER_SEC=10`, `RATE_LIMIT_BURST=40` (`api`); no `REINDEX_CONFIRM`, no secrets |
 | Not present | a snapshot or backup policy for the PVC (F3); an egress NetworkPolicy; `GRPC_URL` is the default public full node |
 
 ### B.SC-1 ID-constant trace
 
 | Location | Value | Kind | Source of truth | Latest on-chain? |
 | --- | --- | --- | --- | --- |
-| `config.ts` | `https://fullnode.{testnet,mainnet}.sui.io:443` | default gRPC endpoints | Mysten | n/a |
-| `config.ts` via `accessGateDeployment('testnet')` | `0xd7ddaa94…88c9` (original-id = published-at) | original ID (event filter and parser prefix) | access-gate-client 0.0.8 `deployments`, from the access-gate-sui publish record (commit `7906954`) | Yes: live events from this package are indexed (event type prefix seen in a head page, 2026-10-09) |
-| `config.ts` via `sealPoliciesDeployment('testnet')` | `0x0c8f7349…773d` (original-id = published-at) | original ID (event filter) | seal-client 0.0.19 `deployments`, from the seal-policies-sui publish record (commit `428e61d`) | Yes: matches the client's record; no sealed content has been published on it yet (0 events) |
+| `config.rs` `DEFAULT_GRPC` (`config.ts` ≤ 0.0.11) | `https://fullnode.{testnet,mainnet}.sui.io:443` | default gRPC endpoints | Mysten | n/a |
+| `config.rs` `DEPLOYMENTS` (testnet; `accessGateDeployment('testnet')` ≤ 0.0.11) | `0xd7ddaa94…88c9` (original-id = published-at) | original ID (event filter and type check) | copied from access-gate-client 0.0.9 `ACCESS_GATE_DEPLOYMENTS` (the same value 0.0.8 carried), from the access-gate-sui publish record | Yes: 11 live events indexed by the Rust ingester (2026-10-19) |
+| `config.rs` `DEPLOYMENTS` (testnet; `sealPoliciesDeployment('testnet')` ≤ 0.0.11) | `0x0c8f7349…773d` (original-id = published-at) | original ID (event filter) | copied from seal-client 0.0.20 `SEAL_POLICIES_DEPLOYMENTS` | Yes: matches the client's record; still 0 sealed-content events (2026-10-19) |
+
+From 0.0.12 the defaults are a copy in `config.rs`, not an import of the client packages (no JS at runtime):
+a new client deployment record must be copied there (CLAUDE.md, README). The client-contract job pins the
+API against the same client versions.
 
 The superseded `0xa55789…` and `0x61c4aa…` packages are immutable and are not indexed any more.
 
@@ -1272,14 +1558,42 @@ whose parsers match the full type string; the coupling test is the *client contr
 
 ### B.SC-3 Cross-implementation parity
 
-N/A (single implementation). The clients and the indexer share `readIndexerEvents` semantics (https only,
-1 MiB cap, page shape) in the clients; the indexer's API shape is pinned by the client-contract tests.
+Single implementation in service. The 2026-10-19 cutover was checked against the replaced TypeScript one:
+
+| Behaviour | 0.0.11 (TS) | 0.0.12 (Rust) | Evidence |
+| --- | --- | --- | --- |
+| Stored `kind`, `gate_id`, `commission_mist` | client parsers on the BCS | type name + node JSON | 19/19 identical on live testnet events (F24) |
+| Stored cursor for a page | `core.listEvents` `endCursor` | `PageBuilder` | same value (`KAFCDginh429ARDNzazFDxgA`) for the same page |
+| API responses | `api.ts` | `handler.rs` | byte-identical for 10 routes and 6 error/redirect cases against the live instance |
+| Client reading | through the handler (vitest) | through the binary over HTTP (`contract` job) | 5 contract tests with the published clients |
+
+The clients and the indexer share `readIndexerEvents` semantics (https only, `redirect: 'error'`, 1 MiB cap,
+page shape) in the clients; the contract job checks a canonical query is served without a redirect, a
+non-canonical one is a `301` the client refuses, and a 100-event page stays under the cap.
 
 ---
 
 ## Section C — Test-coverage & hermetic/live split
 
-### C.1 Coverage grade — A- (52/52 at 0.0.10; coverage not re-measured; `main.ts` still untested)
+### C.1 Coverage grade — A (0.0.12: 107 Rust tests, 90.7% lines; the startup wiring is tested)
+
+**2026-10-19 (Rust):** the 0.0.11 cases are ported one for one (api 19 → `crates/api/src/tests.rs`, ingest
+22 → `crates/{store,ingest}`, config 5 and chain 3 → `config.rs`/`chain.rs`, sbom 3 → the 10-case
+`scripts/tests/check-sbom-test.sh`) and extended. **The `main` wiring gap is closed:** the startup order, the
+loop and the healthcheck live in `crates/ingest/src/lib.rs` (`start`, `run_loop`, `healthcheck`) and the API's
+in `server.rs`/`lib.rs` (`serve`, `context`), all tested (chain refusal, package refusal and confirmed reindex
+with backups, the cutover backup, the poll interval and shutdown, the healthcheck threshold, serving over a
+socket, header timeout, oversized head, graceful stop). What stays untested in-process is each `main.rs`
+(environment, runtime, signal handler; 0% lines), which the container smoke test runs.
+
+| Dimension | Assessment (0.0.12) |
+| --- | --- |
+| Happy path | as below, plus the real `sui-rpc` client against a local LedgerService stub, and the client contract against the binary |
+| Error path | as below, plus unreachable node, chain mismatch, unreadable chain id, package change refused at start, undecodable JSON renderings (ten mutations), `503` before the database exists |
+| Boundary | as below, plus page assembly from arbitrary frames (proptest), URL/query canonicalisation (6 proptests), commission sums beyond 64 bits, the 32 KiB request head |
+| Security-relevant | the read-only database handle (a write is refused), the API never creating the database, the persisted WAL files for a read-only mount |
+
+Below: the 0.0.10 assessment.
 
 | Dimension | Assessment |
 | --- | --- |
@@ -1292,26 +1606,31 @@ Coverage: the first-pass figures (82.0% statements / 85.6% branches at 0.0.4, 30
 17 further tests; the coverage plugin is not installed, so the figure was not re-measured. The grade rises
 from B because the first-pass error-path and boundary gaps (F1, F2, F6) are closed with tests.
 
-**Test layers:**
+**Test layers (0.0.12):**
 
 | Layer | Files | In CI? |
 | --- | --- | --- |
-| Unit / handler | `tests/{api,chain,config,ingest}.test.ts` (52: api 19, ingest 22, config 5, chain 3, sbom 3) | yes (`node-ci.yml` `check`, reused by the release) |
-| Local run against testnet | README → Development (manual, before a release) | no |
-| Image smoke test | `scripts/smoke.sh` (non-root, `/readyz`, headers, `/healthz` 503) | yes (`node-ci.yml` `image`) |
+| Pure unit tests | `crates/store/src/{config,sui,time}.rs`, `crates/ingest/src/chain.rs`, `crates/api/src/{query,ratelimit}.rs` (incl. 6 proptests) | yes (`rust-ci.yml` `check`, reused by the release) |
+| Store / ingest / handler tests (SQLite files, scripted full node) | `crates/{store,ingest,api}/src/tests.rs` (incl. 1 proptest) | yes |
+| Local-socket integration | gRPC stub (`tonic` server) for `GrpcSource`; hyper server tests | yes |
+| Client contract (published TS clients against the built `api` binary) | `tests/contract/contract.test.ts` (5) | yes (`contract` job) |
+| SBOM gate | `scripts/tests/check-sbom-test.sh` (10 cases) and the real SBOMs | yes (`check` job and the release) |
+| Image smoke test (two containers, read-only API mount) | `scripts/smoke.sh` | yes (`image` job) |
 | Config and image scans | Trivy config scan, Trivy image scan | yes (CI, and on the published image before signing) |
+| Local run against testnet | README → Development (manual; done 2026-10-19 with the parity check) | no |
 
-Every test project that exists runs in CI (there is one vitest project, `environment: node`).
+Every test project that exists runs in CI. Up to 0.0.11: one vitest project (52 tests at 0.0.10).
 
 ### C.2 Hermetic vs. live paths
 
 | Path | Hermetic? | Deferred to | Tracking |
 | --- | --- | --- | --- |
-| gRPC `listEvents` semantics (ordering, cursors, timeout) | fake source; SDK read by hand; `tsc` checks the real client against `EventSource` | manual testnet run; the live service (running 0.0.6–0.0.9 against the public node) | F9 |
-| Startup chain-identity check and package binding in `main.ts` | no (`main.ts` untested; the smoke test uses `localnet`) | live start of each release | F16 |
+| gRPC `ListEvents` semantics (ordering, cursors, timeout) | 0.0.12: scripted source, frame proptest, local LedgerService stub with the real client; cursor equality with `@mysten/sui` checked live once | manual testnet run before a release | F9, F12 |
+| Startup chain-identity check and package binding | 0.0.12: yes (`start` tests with a scripted source) | live start of each release | F16 |
+| JSON renderings of kinds not yet seen on testnet | no (fixtures written from the Move sources) | the first such events: re-run the parity check | F24 |
 | Container runtime (nonroot, volume, probes) | smoke test covers nonroot, `/data`, `/readyz`, headers; probes and security context are read from the manifest | cluster | F10, B.IMG-2 |
 | Cloudflare cache and rate rule | no | zone rate-limit rule not set (free plan, maintainer item in the infrastructure README) | F6 |
-| Ingest on real events of the new packages | partly (live: 3 `access-gate` events, 0 `sealed-content`) | first sealed-content publication on `0x0c8f7349…` | B.SC-1 |
+| Ingest on real events of the new packages | partly (live: 11 `access-gate` events on 2026-10-19, 0 `sealed-content`) | first sealed-content publication on `0x0c8f7349…` | B.SC-1 |
 
 ---
 
@@ -1326,6 +1645,9 @@ Every test project that exists runs in CI (there is one vitest project, `environ
 - [x] `.dockerignore` covers `.env*` and `*.db*` — F10 (`ef68727`, released 0.0.7)
 - [x] strict type-check green; no swallowed promises on security paths; untrusted parsers validate every
   field — A16–A20 (`noUncheckedIndexedAccess` on since 0.0.10: F21)
+- [x] clippy -D warnings, fmt, cargo audit + cargo deny green; forbid(unsafe_code) or justified — 0.0.12,
+  2026-10-19 (Environment table; `unsafe_code = "deny"` with one justified FFI call, A16)
+- [x] no panics on attacker-reachable paths — A17 (0.0.12)
 
 ### pre-testnet *(live on testnet since 2026-10-03; all items now met)*
 
@@ -1346,6 +1668,16 @@ Every test project that exists runs in CI (there is one vitest project, `environ
 - [x] lockfile committed; signature, SBOM and provenance on the image; CI gates green — B.IMG-1, B.2
   (the SBOM content gap was F18, closed in 0.0.10)
 - [x] third-party licence notices in the image — F5
+- [x] timeouts on every outbound call; response bodies bounded — A10, A19, A20 (0.0.12: 30 s per gRPC
+  request, tonic's 4 MiB message cap, one 51-item page per request)
+- [x] low-S and ed25519 rules match the Sui client lens; parity vectors green — N/A: the indexer verifies no
+  signatures (A18); the TS↔Rust parity check passed 19/19 (F24, B.SC-3)
+- [x] rate limit keyed on a trusted address; SIGTERM handled — A22, A24
+- [ ] 0.0.12 released and rolled out: tag `v0.0.12` (CI green, signature and three SBOM attestations
+  verified), `config/images.yaml` at 0.0.12 with the consensus digest and `sync-manifests.sh`, then the
+  two-container deployment; after rollout the same events count and generation, a pre-cutover cursor still
+  pages, `/healthz` 200 with both streams fresh, the `.bak-pre-rust-*` copy logged, treasury-ui and seal-ui
+  list history, the status page's "Chain index" is green — maintainer item (release and cluster), D58
 
 ### pre-mainnet
 
@@ -1364,7 +1696,17 @@ Every test project that exists runs in CI (there is one vitest project, `environ
 - [x] chain-identity check on `GRPC_URL` — F8, F16 (0.0.6)
 - [x] image scan gate, scan of the published image before signing, image and manifest scans clean at the
   review date — F10, F17 (CI gate passed for 0.0.9; not re-run locally)
-- [x] `npm audit --audit-level=high` clean — 0 vulnerabilities, 2026-10-09
+- [x] `npm audit --audit-level=high` clean — 0 vulnerabilities, 2026-10-09 (0.0.11; from 0.0.12 `cargo deny`
+  advisories clean, 2026-10-19)
+- [x] decoders fuzzed / property-tested; maximum message size enforced — A19 (7 proptests; prost/tonic
+  4 MiB cap; 32 KiB request head)
+- [x] concurrency limit sized against memory for the configured body cap — F26 (1024 × 32 KiB within the
+  128 MiB limit; bodies are never read)
+- [x] image per the IMG lens; crates.io trusted publishing — IMG rows A31–A37; no crates are published (N/A)
+- [ ] rare-kind `kinds` filters bounded (an `events_kind (stream, kind, id)` index, F25, OQ5) — next patch
+  after the 0.0.12 cutover
+- [ ] the JSON-vs-BCS parity check re-run once sealed-content and gate-lifecycle events exist on the network
+  (F24) — gated on those events
 
 ---
 
@@ -1390,7 +1732,11 @@ Every test project that exists runs in CI (there is one vitest project, `environ
 - **Seal discovery is unauthenticated end to end.** seal-client F6 + F8 here: pointers come from the
   full node or the indexer, and neither is authenticated against an independent source.
 - **Pre-v0.2 policy:** F1–F3 and F6 changed the API (added fields, redirects) in 0.0.5 as planned; the
-  versioning is patch-only until go-live (0.0.9 now).
+  versioning is patch-only until go-live (0.0.12 for the Rust rewrite, a breaking internal change).
+- **No JS/TS backends (D58, 2026-10-19).** The indexer is the first backend moved; the Rust patterns
+  (cargo-chef + distroless `cc`, cargo-deny, cargo-about notices, Cargo SBOM gate in bash + jq, a CI contract
+  job driving the published TS clients against the binary) come from gateway-rust and seal-key-server and are
+  reusable for the next one (nft-gate's Workers gateway, plan Part E).
 
 ---
 
@@ -1406,7 +1752,25 @@ Every test project that exists runs in CI (there is one vitest project, `environ
    licence notices — **holds** (F4, F5).
 5. MUST map equivalent requests to one cache key — **holds** (F6).
 
-**TS lens baseline:**
+6. MUST keep the API process unable to write the index (0.0.12) — **holds** (F22).
+7. MUST keep the stored columns equal to what the client parsers derive from the BCS — **holds** on every
+   live event (F24); re-check when new kinds appear.
+
+**RUST lens baseline (from 0.0.12):**
+
+| ID | Holds? | Evidence |
+| --- | --- | --- |
+| RS-M1 | yes (`unsafe_code` denied; one justified FFI call; no panics on request paths) | A16, A17 |
+| RS-M2 | N/A (no signatures) | A18 |
+| RS-M3 | yes (the only hand-written parser — URL/query — is property-tested; protobuf is generated with tonic's message cap) | A19 |
+| RS-M4 | yes (bodies never read; 32 KiB head; 1024 connections) | F26, A20 |
+| RS-M5 | yes (30 s per gRPC request; response sizes bounded by the page size and tonic's cap) | A10, A20 |
+| RS-M6 | yes (one writer, atomic page + cursor; the API read-only) | A21, F22 |
+| RS-M7 | yes | A22 |
+| RS-M8 | yes (no secrets; SIGTERM handled in both processes) | A23, A24 |
+| RS-M9 | N/A in service (single implementation); the replaced TS implementation was compared (B.SC-3) | B.SC-3 |
+
+**TS lens baseline (≤ 0.0.11):**
 
 | ID | Holds? | Evidence |
 | --- | --- | --- |
@@ -1443,7 +1807,7 @@ Every test project that exists runs in CI (there is one vitest project, `environ
 | IMG-M5 | yes (image 65532; pod context read from the manifest 2026-10-09) | B.IMG-2 |
 | IMG-M6 | yes (digest from `config/images.yaml`; 16/16 images cosign-verified 2026-10-09 and again 2026-10-18) | B.IMG-2, B.IMG-1 |
 | IMG-M7 | yes (signature, SBOM attestation and provenance present on Docker Hub; the private mirror is best-effort) | F10, B.IMG-1 |
-| IMG-M8 | yes from 0.0.10 (scan before sign, licence notices, identity-pinned verification; the bundle is listed in a second attested SBOM; confirmed on the published 0.0.10 digest, 2026-10-18) | F10, F5, F18 |
+| IMG-M8 | yes from 0.0.10 (scan before sign, licence notices, identity-pinned verification; the bundle is listed in a second attested SBOM; confirmed on the published 0.0.10 digest, 2026-10-18). 0.0.12: per-binary Cargo SBOMs, checked; to be confirmed on the published digest | F10, F5, F18 |
 
 ## Implementation suggestions (SHOULD / MAY)
 
@@ -1460,10 +1824,13 @@ Every test project that exists runs in CI (there is one vitest project, `environ
 - **S6** SHOULD generate the SPDX SBOM from the source tree and attest that (F18) — done in 0.0.10.
 - **S7** SHOULD enable `noUncheckedIndexedAccess` and use `Object.hasOwn` / `Map` for operator-keyed lookups
   (F20, F21) — done in 0.0.10.
+- **S8** SHOULD add `events_kind (stream, kind, id)` with a page-cost test for a rare kind (F25, OQ5).
+- **S9** MAY run the client-contract job against the image too (today it runs against the binary built on
+  the runner; the smoke test covers the image's processes).
 
 ## Open questions (`OQ#`)
 
-All four first-pass questions are decided; none remains open.
+The four first-pass questions are decided; OQ5 (2026-10-19) is open.
 
 1. **OQ1** F3 — decided: a fresh publish clears the old package's rows after a `VACUUM INTO` backup;
    history is not kept queryable per package; deletion requires `REINDEX_CONFIRM` naming the stream.
@@ -1473,6 +1840,10 @@ All four first-pass questions are decided; none remains open.
 4. **OQ4** — answered 2026-10-09: `/healthz` is wired to the status page ("Chain Access → Chain index",
    `OPERATOR_TASKS.md`); there is **no** volume snapshot or backup policy for `sui-indexer-data` (F3),
    and no `OPERATOR_TASKS.md` row for it yet — a maintainer item.
+5. **OQ5** F25 — when to add `events_kind (stream, kind, id)`: (a) in the 0.0.12 cutover (one rollout, but
+   the cutover would no longer be schema-identical); (b) in the next patch after the cutover has settled
+   (recommended: the cutover stays a pure language change and the index is additive and rollback-safe);
+   (c) not at all, relying on the edge cache and the limiter (the cost grows with history).
 
 ## Risks
 
@@ -1484,12 +1855,36 @@ All four first-pass questions are decided; none remains open.
   F6).
 - **Supply-chain blind spot:** closed in 0.0.10: the bundled dependencies are in an attested SBOM (F18);
   `npm audit`, Dependabot and the Trivy gate cover the lockfile and the base image (F4, F17).
-- **Upstream node trust:** a compromised full node can inject display rows (F8, display-only).
+- **Upstream node trust:** a compromised full node can inject display rows (F8, display-only); from 0.0.12 it
+  also renders the JSON the filter columns come from (F24).
+- **Cutover (0.0.12):** the manifests must not be applied before the 0.0.12 digest is pinned; the
+  `.bak-pre-rust-*` copy and the 0.0.11 digest are the rollback (workspace README). Rare-kind filters walk the
+  stream (F25) as they did before.
 
 ---
 
 ## Re-verification log
 
+- 2026-10-19 — Rust rewrite (0.0.12; local commits `1fcbbe9`, `76595ca`, `784250a`, `ddfc77d` and the docs
+  commit, on `fb79cd7`; not released, not deployed).
+  - **Lenses:** AUDIT_TEMPLATE.md + RUST + SUI_CLIENT + IMG at 2026-10-08; TS no longer applies to the service
+    (only to the CI-only `tests/contract`). Section A's TS rows are replaced by RUST rows; A38–A43 added.
+  - **Re-verified:** F1–F21 against the Rust code (a note on each). F11 → RESOLVED (the infrastructure
+    retention wording fixed in the workspace manifests). F16's residual (startup path untested) closed. No
+    disposition regressed.
+  - **New:** F22 (read-only API process, Positive), F23 (health and liveness across two processes, RESOLVED),
+    F24 (columns from the node's JSON, ADJUDICATED with the parity gate), F25 (rare-kind filters walk the
+    stream, pre-existing, DEFERRED, OQ5), F26 (connection cap, RESOLVED in `ddfc77d`).
+  - **C.1 resolved:** the startup wiring is tested (Section C).
+  - **Measured:** 107/107 Rust tests, 90.7% lines; clippy/fmt clean; MSRV 1.88 checks; `cargo deny` clean;
+    cargo-about notices generate; Cargo SBOMs pass the gate (63/63, 139/139); 5/5 client-contract tests
+    against the binary; podman image 38.3 MB and the two-container smoke test passes; parity 19/19; API
+    byte-identical to the live 0.0.11 for 16 checked requests; load figures in Environment.
+  - **Totals F1–F26:** 15 RESOLVED, 2 MITIGATED, 3 ADJUDICATED, 0 ACCEPTED-RISK, 2 DEFERRED (F19, F25),
+    4 Positive.
+  - **Not run:** the GitHub workflows (publish, Trivy, cosign, actionlint), the cluster rollout (a Section D
+    maintainer row), a live-DB copy diff (no cluster access in this pass; every live row is among the 19
+    parity events, since the live index holds the same 11 events the node serves).
 - 2026-10-18 — code gates closed in `0.0.10` (commit `4aab344`), on top of `d1910e0`.
   - **Fixed:** F18 (and F4): the release attests a second SPDX SBOM from `npm sbom --omit dev`, checked by
     `scripts/check-sbom.mjs` (CI `check` job and the release). F20: `Map` lookups for `NETWORK`. F21:
@@ -1555,12 +1950,15 @@ All four first-pass questions are decided; none remains open.
 
 ## Pre-save consistency checklist (this pass)
 
-- [x] Section A ↔ findings: A11 and A16 now HOLD (F18, F21; 2026-10-18); A6 caveat (F3, backup on the same
-  volume); A1 caveat (F19).
-- [x] Finding header ↔ body: consistent (F1–F21).
-- [x] Template line: base + TS + SUI_CLIENT + IMG with registry dates; untriggered lenses named.
+- [x] Section A ↔ findings: A16–A24 are RUST rows (2026-10-19); A38–A42 HOLD (F22–F24, cutover); A43 does not
+  hold (F25, DEFERRED with OQ5); A6 caveat (F3, backup on the same volume); A1 caveat (F19).
+- [x] Finding header ↔ body: consistent (F1–F26; F11 header moved to RESOLVED with its note).
+- [x] Template line: base + RUST + SUI_CLIENT + IMG with registry dates; untriggered lenses named, TS's
+  remaining scope (CI-only contract project) stated.
 - [x] Closing four-part structure present (normative, suggestions, open questions, risks).
-- [x] Section D ↔ dispositions: every unticked item names a gate or a maintainer item.
-- [x] Executive summary ↔ dispositions and ceiling (Medium; realised Low); totals F1–F21 checked (2026-10-18: 12 / 3 / 2 / 0 / 1 / 3).
-- [x] C.1 counts measured 2026-10-18 (52 tests).
-- [x] Re-verification log entry added (2026-10-09, 2026-10-18).
+- [x] Section D ↔ dispositions: every unticked item names a gate or a maintainer item (the 0.0.12 rollout,
+  F25/OQ5, the F24 re-run, F19, mainnet, volume backup, edge rule, external review).
+- [x] Executive summary ↔ dispositions and ceiling (Medium; realised Low); totals F1–F26 checked
+  (2026-10-19: 15 / 2 / 3 / 0 / 2 / 4).
+- [x] C.1 counts measured 2026-10-19 (107 Rust tests, 5 contract, 10 SBOM-gate cases).
+- [x] Re-verification log entry added (2026-10-09, 2026-10-18, 2026-10-19).
