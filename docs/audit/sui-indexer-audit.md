@@ -773,7 +773,7 @@ the access-gate-client audit (exact-type matching at the original ID).
 - **Verify job.** It runs no `npm run build`. The image build does it, but only after the verify job
   passes.
 - **Mirror.** `publish-private` is `continue-on-error`, unsigned and unattested (documented
-  best-effort).
+  best-effort). Since 2026-10-19 it is replaced by `mirror-private`, which copies the signed public image by digest.
 - **Labels.** `VERSION` passes `github.ref_name` (`v0.0.4`) into `org.opencontainers.image.version`,
   whereas semver tags drop the `v`.
 - **Referrer annotation.** The SPDX attestation's referrer annotation reads `cosign/sign/v1` although
@@ -807,7 +807,7 @@ the access-gate-client audit (exact-type matching at the original ID).
 - **Verification command.** The release summary prints a `cosign verify` command pinned to
   `…/sui-indexer/\.github/workflows/docker-publish\.yml@refs/tags/v`.
 - **Residuals, accepted.** (1) `publish-private` is `continue-on-error`, unsigned and unattested
-  (documented best-effort; the mirror job fails without registry credentials, a maintainer item). (2) The
+  (documented best-effort; the mirror job fails without registry credentials, a maintainer item; replaced 2026-10-19 by the digest-preserving `mirror-private`). (2) The
   SBOM attestation's referrer annotation still reads `cosign/sign/v1` (verified on 0.0.9; a cosign quirk).
   The completeness of the SBOM is F18.
 
@@ -1188,7 +1188,7 @@ vitest 5 majors per the workspace decisions.
 | Authority | Where | Custody | Gates |
 | --- | --- | --- | --- |
 | Push to `quay.io/meddleware-org`, `docker.io/meddleware` | `docker-publish.yml` (tag `v*`) | repo secrets (`QUAY_*`, `DOCKERHUB_*`) | releases; credentials inventory is a maintainer item (`OPERATOR_TASKS.md`) |
-| Push to self-hosted registry | same | `PRIVATE_REGISTRY_*` | best-effort |
+| Copy to self-hosted registry (`mirror-private`, by digest) | same | `PRIVATE_REGISTRY_*` | best-effort |
 | Signing / attestation | same | OIDC keyless (`id-token: write`, `attestations: write`) | releases |
 
 #### CI & release integrity
@@ -1551,6 +1551,7 @@ All four first-pass questions are decided; none remains open.
 - 2026-10-18 — released and deployed (`v0.0.10` = `5251f38`, `0.0.10@sha256:b3484ce42a8484383efd598a3f21d3cb7077c7e3d4b73eb0df1c740b221d8a58`), verified live. Cosign keyless signature verified against the workflow-anchored identity (`verify-digests.sh` 16/16); the digest carries two SPDX attestations, the image SBOM (17 packages) and the npm packages SBOM (24 packages), both verified with `cosign verify-attestation --type spdxjson` on 2026-10-18 (F18 post-release check closed); rollout succeeded; `/healthz` ok on the same database generation `e32e37afbbe9` (re-read 2026-10-18). F19 (client change), F3 volume backup, the Cloudflare zone rule and the external review remain open.
 - 2026-10-19 — dependency-bot status checked (read-only): `.github/dependabot.yml` carries the `ignore` rules and the repository has no open Dependabot pull requests (`gh pr list`, 2026-10-19). Versions, findings and gates were not re-examined in this pass.
   - Dependabot policy encoded in .github/dependabot.yml (majors declined); open PRs merged 2026-10-19
+  - `docker-publish.yml`: the private rebuild jobs are replaced by one `mirror-private` job that copies the published quay.io image (and its cosign artifacts) to the self-hosted registry by digest and fails unless the digest and the signature match (build once, promote by digest; committed locally, not yet released; the `PRIVATE_REGISTRY_*` credentials are still unset).
 
 ## Pre-save consistency checklist (this pass)
 
