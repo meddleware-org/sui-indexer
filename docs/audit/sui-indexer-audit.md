@@ -1318,7 +1318,7 @@ becomes a second input that must agree with the BCS.
 
 ### F25 — A `kinds` filter for a rare kind walks the stream (found 2026-10-19 by the load test)
 
-**Severity:** Low   **Disposition:** RESOLVED (2026-10-19, 0.0.13, commit 8e6c986; pre-existing in 0.0.4–0.0.12; OQ5 decided)
+**Severity:** Low   **Disposition:** RESOLVED (2026-10-19, 0.0.13, commit 5411b13; pre-existing in 0.0.4–0.0.12; OQ5 decided)
 **Where:** `crates/store/src/lib.rs` `read::page` (`WHERE stream = ? AND kind IN (…) [AND gate_id = ?]
 ORDER BY id DESC LIMIT ?`); the schema's indexes are `(stream, id)` and `(stream, gate_id, id)` only (same as
 `store.ts`).
@@ -1750,7 +1750,7 @@ Every test project that exists runs in CI. Up to 0.0.11: one vitest project (52 
   128 MiB limit; bodies are never read)
 - [x] image per the IMG lens; crates.io trusted publishing — IMG rows A31–A37; no crates are published (N/A)
 - [x] rare-kind `kinds` filters bounded — F25, OQ5: `events_kind (stream, kind, id)` created by the ingester,
-  one seek per kind; query-plan and page-cost tests; 8 → ≈ 33,000 pages/s on 300k rows (0.0.13, commit 8e6c986)
+  one seek per kind; query-plan and page-cost tests; 8 → ≈ 33,000 pages/s on 300k rows (0.0.13, commit 5411b13)
 - [ ] the JSON-vs-BCS parity check re-run once sealed-content and gate-lifecycle events exist on the network
   (F24) — gated on those events
 
