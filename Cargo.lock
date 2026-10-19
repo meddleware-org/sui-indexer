@@ -1186,7 +1186,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 name = "sui-indexer-api"
 version = "0.0.12"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "bytes",
  "http-body-util",
  "hyper",
@@ -1204,7 +1204,7 @@ dependencies = [
 name = "sui-indexer-ingest"
 version = "0.0.12"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "bs58",
  "proptest",
  "prost-types",
