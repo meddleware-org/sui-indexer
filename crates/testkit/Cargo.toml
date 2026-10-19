@@ -1,0 +1,20 @@
+[package]
+name = "sui-indexer-testkit"
+description = "Test fixtures for sui-indexer (dev-only; never linked into the shipped binaries)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "seed-fixture"
+path = "src/main.rs"
+
+[dependencies]
+sui-indexer-store = { path = "../store" }
+serde_json = "=1.0.154"

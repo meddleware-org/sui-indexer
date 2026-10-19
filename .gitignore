@@ -1,16 +1,15 @@
-# Dependencies
+# Rust build output
+target/
+
+# SBOMs generated in CI (cargo cyclonedx writes them next to each Cargo.toml)
+*.cdx.json
+
+# The CI-only client-contract project's dependencies
 node_modules/
 
-# Build output
-dist/
-build/
-
-# Type-check cache
-*.tsbuildinfo
-
-# Test output
-coverage/
-.vitest-cache/
+# Coverage output
+coverage.txt
+lcov.info
 
 # Environment
 .env
@@ -19,7 +18,6 @@ coverage/
 
 # Logs
 *.log
-npm-debug.log*
 
 # OS
 .DS_Store
@@ -31,7 +29,8 @@ Thumbs.db
 *.swp
 *.swo
 
-# Local SQLite index (DB_PATH in development)
+# Local SQLite index (DB_PATH in development) and its backups
 *.db
 *.db-wal
 *.db-shm
+*.bak-*

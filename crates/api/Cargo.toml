@@ -1,0 +1,36 @@
+[package]
+name = "sui-indexer-api"
+description = "sui-indexer API: read-only SQLite, cacheable GET pages over hyper."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "api"
+path = "src/main.rs"
+
+[dependencies]
+sui-indexer-store = { path = "../store" }
+# HTTP/1.1 server without a web framework: hyper + hyper-util (timeouts, graceful shutdown).
+hyper = { version = "=1.12.0", features = ["http1", "server"] }
+hyper-util = { version = "=0.1.21", features = ["tokio", "server", "server-graceful", "http1"] }
+http-body-util = "=0.1.5"
+bytes = "=1.12.1"
+tokio = { version = "=1.53.3", features = ["rt-multi-thread", "macros", "net", "time", "signal"] }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+base64 = "=0.22.1"
+
+[dev-dependencies]
+tokio = { version = "=1.53.3", features = ["rt-multi-thread", "macros", "net", "time", "signal", "io-util", "sync"] }
+sui-indexer-testkit = { path = "../testkit" }
+tempfile = "=3.27.0"
+proptest = { version = "=1.12.0", default-features = false, features = ["std"] }
+hyper = { version = "=1.12.0", features = ["http1", "server", "client"] }
+hyper-util = { version = "=0.1.21", features = ["tokio", "server", "server-graceful", "http1", "client-legacy"] }

@@ -1,0 +1,28 @@
+[workspace]
+resolver = "3"
+members = ["crates/store", "crates/ingest", "crates/api", "crates/testkit"]
+
+[workspace.package]
+version = "0.0.12"
+edition = "2024"
+# The dependency graph's floor (checked in CI by the `msrv` job).
+rust-version = "1.88"
+license = "0BSD"
+repository = "https://github.com/meddleware-org/sui-indexer"
+publish = false
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
+
+[profile.release]
+# Arithmetic overflow aborts instead of wrapping silently, even in release builds.
+overflow-checks = true
+# A panic stops the process (Kubernetes restarts the container with clean state).
+panic = "abort"
+lto = true
+codegen-units = 1
+strip = true
