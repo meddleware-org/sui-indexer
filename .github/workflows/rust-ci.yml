@@ -1,0 +1,145 @@
+name: Rust CI
+
+# fmt, clippy, tests, coverage, cargo-deny, the SBOM gate, MSRV, the client contract (the published TS
+# client packages against the built `api` binary: test tooling only, nothing of it ships), and the
+# image (configuration scan, licence notices, build, vulnerability scan, two-binary smoke test).
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  # The release workflow runs the same checks on the tagged commit.
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: fmt, clippy, test, coverage, cargo-deny, SBOM gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # rustup ships on the runner image; using it directly leaves no third-party toolchain action to pin.
+      - name: Install the stable toolchain
+        run: rustup toolchain install stable --profile minimal --component rustfmt,clippy,llvm-tools --no-self-update && rustup default stable
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          # Only save the cache on main-branch pushes to avoid saturating the cache upload bandwidth.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Format check
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: Test
+        run: cargo test --locked
+
+      # Coverage figure (RUST lens): printed to the job summary; informational, not a gate.
+      - name: Install cargo-llvm-cov and cargo-cyclonedx
+        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+        with:
+          tool: cargo-llvm-cov@0.9.1,cargo-cyclonedx@0.5.9
+
+      - name: Coverage
+        run: |
+          cargo llvm-cov --locked --summary-only | tee coverage.txt
+          { echo '### Line coverage'; echo '```'; tail -n 3 coverage.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      # Advisories, licences, bans and sources per deny.toml (the same RustSec database as `cargo audit`).
+      - name: cargo deny
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+
+      # The release attests a CycloneDX SBOM per binary; this is the gate it must pass there too.
+      - name: SBOM gate (tests, then the real SBOMs)
+        run: |
+          bash scripts/tests/check-sbom-test.sh
+          for bin in api ingest; do
+            cargo cyclonedx --manifest-path "crates/${bin}/Cargo.toml" --format json --spec-version 1.5 \
+              --no-build-deps --target x86_64-unknown-linux-gnu -q
+            bash scripts/check-sbom.sh "crates/${bin}/sui-indexer-${bin}.cdx.json" "sui-indexer-${bin}"
+          done
+
+  msrv:
+    name: MSRV (rust-version in Cargo.toml)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install the declared minimum toolchain
+        run: rustup toolchain install 1.88 --profile minimal --no-self-update && rustup default 1.88
+      - name: Check on the declared minimum toolchain
+        run: cargo check --locked --workspace --all-targets
+
+  contract:
+    name: Client contract (published clients against the api binary)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install the stable toolchain
+        run: rustup toolchain install stable --profile minimal --no-self-update && rustup default stable
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build the api binary and the fixture seeder
+        run: cargo build --release --locked -p sui-indexer-api -p sui-indexer-testkit
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26'
+
+      - name: Run the client packages against the binary
+        working-directory: tests/contract
+        env:
+          API_BIN: ${{ github.workspace }}/target/release/api
+          SEED_BIN: ${{ github.workspace }}/target/release/seed-fixture
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm test
+
+  image:
+    name: Image (configuration scan, licence notices, build, scan, smoke test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Trivy configuration scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: config
+          scan-ref: .
+          scanners: misconfig,secret
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          version: v0.74.0
+
+      # cargo-about fails the stage when a linked crate's licence is not accepted by about.toml.
+      - name: Third-party licence notices
+        run: |
+          docker build --target notices --tag sui-indexer:notices .
+          for bin in api ingest; do
+            docker run --rm sui-indexer:notices cat "/out/THIRD_PARTY_LICENSES-${bin}.txt" > "THIRD_PARTY_LICENSES-${bin}.txt"
+            test -s "THIRD_PARTY_LICENSES-${bin}.txt"
+            grep -q 'Apache License' "THIRD_PARTY_LICENSES-${bin}.txt"
+          done
+
+      - name: Build (not pushed)
+        run: docker build --tag sui-indexer:ci .
+
+      - name: Scan the image (fail on fixable CRITICAL/HIGH)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: sui-indexer:ci
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          ignore-unfixed: true
+          version: v0.74.0
+
+      - name: Smoke test (both binaries, read-only API mount)
+        run: bash scripts/smoke.sh sui-indexer:ci

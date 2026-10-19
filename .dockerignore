@@ -1,6 +1,5 @@
-node_modules
-dist
-tests
+target
+**/node_modules
 .git
 .github
 *.md

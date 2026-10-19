@@ -3,7 +3,8 @@ name: Publish (Docker)
 #
 # Supply-chain controls (verifiable by any anonymous operator):
 #   - Multi-arch build (linux/amd64, linux/arm64) via Buildx/QEMU
-#   - SPDX SBOMs (image + bundled npm packages) attested with cosign; SLSA provenance by BuildKit
+#   - SBOMs attested with cosign: the image (SPDX, syft) and each binary's crates (CycloneDX,
+#     cargo-cyclonedx, checked against Cargo.lock by scripts/check-sbom.sh); SLSA provenance by BuildKit
 #   - Keyless cosign signatures (Sigstore Fulcio/Rekor) over the image digest
 #   - GitHub-native build-provenance attestation
 #   - `latest` is published ONLY for stable (non-pre-release) semver tags
@@ -32,7 +33,7 @@ permissions:
 
 jobs:
   version:
-    name: Tag matches the package version
+    name: Tag matches the Cargo workspace version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -40,17 +41,18 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
         run: |
-          VERSION="$(node -p "require('./package.json').version")"
+          VERSION="$(cargo metadata --no-deps --locked --format-version 1 | jq -r '.packages[] | select(.name == "sui-indexer-api") | .version')"
           if [ "${TAG#v}" != "$VERSION" ]; then
-            echo "::error::tag ${TAG} does not match package.json version ${VERSION}"
+            echo "::error::tag ${TAG} does not match the Cargo workspace version ${VERSION}"
             exit 1
           fi
 
-  # The release runs exactly what CI runs (type-check, lint, tests, bundle, licences, configuration and
-  # image scans, container smoke test) on the tagged commit, so no check can be skipped by tagging.
+  # The release runs exactly what CI runs (fmt, clippy, tests, cargo-deny, the SBOM gate, MSRV, the client
+  # contract, licence notices, configuration and image scans, the two-binary smoke test) on the tagged
+  # commit, so no check can be skipped by tagging.
   verify:
     name: Verify (CI checks)
-    uses: ./.github/workflows/node-ci.yml
+    uses: ./.github/workflows/rust-ci.yml
 
   publish-public:
     name: Publish (quay.io + Docker Hub)
@@ -142,11 +144,13 @@ jobs:
           cosign sign --yes "quay.io/${QUAY_NS}/${IMAGE}@${DIGEST}"
           cosign sign --yes "docker.io/${DOCKERHUB_NS}/${IMAGE}@${DIGEST}"
 
-      # Two SPDX SBOMs are attested, because the image ships one esbuild bundle (IMG-M8 / F18):
-#   1. the published image (Debian base, node, ...): syft cannot see the bundled npm packages in it;
-#   2. the production npm dependencies from package-lock.json (`npm sbom --omit dev`), checked against
-#      the lockfile by scripts/check-sbom.mjs so a missing package stops the release.
-# `cosign verify-attestation --type spdxjson` returns both; the npm one is named `@meddleware/sui-indexer@<version>`.
+      # Three SBOMs are attested to the image digest:
+      #   1. the published image (SPDX, syft): the distroless base, plus the crates syft reads from the
+      #      /app/Cargo.lock it ships;
+      #   2. and 3. the crates linked into /app/api and /app/ingest (CycloneDX, cargo-cyclonedx, build and
+      #      dev dependencies excluded), each checked against the Cargo.lock dependency graph by
+      #      scripts/check-sbom.sh, so a missing crate stops the release.
+      # `cosign verify-attestation --type spdxjson` returns the first, `--type cyclonedx` the other two.
       - name: Generate SBOM
         uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
@@ -155,15 +159,19 @@ jobs:
           output-file: sbom.spdx.json
           upload-artifact: false
 
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - name: Install cargo-cyclonedx
+        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
-          node-version: '26'
+          tool: cargo-cyclonedx@0.5.9
 
-      - name: Generate the SBOM of the bundled npm dependencies
+      - name: Generate the SBOMs of the two binaries
         run: |
-          npm ci --ignore-scripts --no-audit --no-fund
-          npm sbom --sbom-format spdx --omit dev > sbom.npm.spdx.json
-          node scripts/check-sbom.mjs sbom.npm.spdx.json
+          for bin in api ingest; do
+            cargo cyclonedx --manifest-path "crates/${bin}/Cargo.toml" --format json --spec-version 1.5 \
+              --no-build-deps --target x86_64-unknown-linux-gnu -q
+            cp "crates/${bin}/sui-indexer-${bin}.cdx.json" "sbom.${bin}.cdx.json"
+            bash scripts/check-sbom.sh "sbom.${bin}.cdx.json" "sui-indexer-${bin}"
+          done
 
       - name: Attest SBOMs (keyless)
         env:
@@ -171,9 +179,11 @@ jobs:
           QUAY_NS: ${{ vars.QUAY_NAMESPACE || 'meddleware-org' }}
           DOCKERHUB_NS: ${{ vars.DOCKERHUB_NAMESPACE || 'meddleware' }}
         run: |
-          for sbom in sbom.spdx.json sbom.npm.spdx.json; do
-            cosign attest --yes --type spdxjson --predicate "$sbom" "quay.io/${QUAY_NS}/${IMAGE}@${DIGEST}"
-            cosign attest --yes --type spdxjson --predicate "$sbom" "docker.io/${DOCKERHUB_NS}/${IMAGE}@${DIGEST}"
+          for ref in "quay.io/${QUAY_NS}/${IMAGE}@${DIGEST}" "docker.io/${DOCKERHUB_NS}/${IMAGE}@${DIGEST}"; do
+            cosign attest --yes --type spdxjson --predicate sbom.spdx.json "$ref"
+            for bin in api ingest; do
+              cosign attest --yes --type cyclonedx --predicate "sbom.${bin}.cdx.json" "$ref"
+            done
           done
 
       - name: Attest build provenance (quay.io)

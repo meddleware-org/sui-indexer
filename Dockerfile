@@ -1,21 +1,52 @@
-# ── Build stage ───────────────────────────────────────────────────────────────
-# Bases pinned by digest for reproducible builds; the tags are kept for readability.
-# To bump: skopeo inspect --format '{{.Digest}}' docker://docker.io/library/node:26-trixie-slim
-FROM docker.io/library/node:26-trixie-slim@sha256:0d1e33586362bb9e608c4e751e7a9e7edb55c9ac11461ed5666af696cc461dd4 AS builder
+# =============================================================================
+# sui-indexer — one image, two binaries: /app/ingest (the sole writer) and /app/api (read-only).
+# =============================================================================
+# Multi-stage build with cargo-chef for dependency-layer caching:
+#   chef     — the Rust toolchain plus cargo-chef
+#   planner  — computes the dependency recipe from Cargo.toml/lock
+#   notices  — cargo-about licence notices of each binary (fails on an unaccepted licence)
+#   builder  — compiles the dependencies (cached), then the two binaries (--locked)
+#   runtime  — distroless/cc: glibc + CA certificates; no shell, no package manager
+#
+# SQLite is compiled in (rusqlite "bundled") and TLS is rustls with the webpki roots, so the runtime
+# needs only glibc. Both base images are pinned by digest (multi-arch index); bump tag and digest
+# together (`skopeo inspect --format '{{.Digest}}' docker://<image>:<tag>`).
+# =============================================================================
 
+FROM docker.io/library/rust:1-slim@sha256:4cd829461bd5c4d511c32e269da9cb8929223b666519d8004e35fc8d1d771ab7 AS chef
+RUN cargo install cargo-chef --version 0.1.78 --locked
 WORKDIR /src
-COPY package.json package-lock.json ./
-RUN npm ci --no-audit --no-fund
-COPY tsconfig.json ./
-COPY src ./src
-COPY scripts ./scripts
-# One self-contained ESM bundle: the runtime image needs no node_modules.
-RUN npm run build && npm run licenses
 
-# ── Runtime stage ─────────────────────────────────────────────────────────────
-# distroless Node 26: no shell, no package manager; runs as nonroot (65532).
-# To bump: skopeo inspect --format '{{.Digest}}' docker://gcr.io/distroless/nodejs26-debian13:nonroot
-FROM gcr.io/distroless/nodejs26-debian13:nonroot@sha256:044d090d0c3ccfd30722126ebe46704885698970c8a303419dc0d704d628f0da
+# ── Planner: derive the dependency recipe ────────────────────────────────────
+FROM chef AS planner
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
+
+# ── Licence notices (Apache-2.0 §4(a) and the MIT/BSD notice clauses) ────────
+# `--fail` stops the build when a linked crate's licence is not accepted by about.toml. CI builds this
+# target alone (`--target notices`) so a licence problem shows up without a full compile.
+FROM chef AS notices
+RUN cargo install --locked --version 0.9.2 --features cli cargo-about
+COPY . .
+RUN mkdir -p /out \
+ && for bin in api ingest; do \
+      cargo about generate --locked --fail -c about.toml --manifest-path "crates/${bin}/Cargo.toml" about.hbs \
+        > "/out/THIRD_PARTY_LICENSES-${bin}.txt"; \
+    done \
+ && grep -q 'Apache License' /out/THIRD_PARTY_LICENSES-ingest.txt
+
+# ── Builder: compile deps (cached), then the binaries ────────────────────────
+FROM chef AS builder
+COPY --from=planner /src/recipe.json recipe.json
+# Re-used on every build where only the sources change (not Cargo.lock).
+RUN cargo chef cook --release --locked --recipe-path recipe.json -p sui-indexer-api -p sui-indexer-ingest
+COPY . .
+RUN cargo build --release --locked -p sui-indexer-api -p sui-indexer-ingest \
+ && install -D -m 0755 target/release/api /out/api \
+ && install -D -m 0755 target/release/ingest /out/ingest
+
+# ── Runtime: minimal distroless image ────────────────────────────────────────
+FROM gcr.io/distroless/cc-debian13:nonroot@sha256:e792ab3d241a468a4fd7519ddbbebe66b49b5f365771716ea688ad40b6c6f1c2
 
 ARG VERSION=dev
 ARG VENDOR="Meddleware"
@@ -34,17 +65,19 @@ LABEL org.opencontainers.image.title="sui-indexer" \
       org.opencontainers.image.version="${VERSION}"
 
 WORKDIR /app
-COPY --from=builder /src/dist/main.mjs ./main.mjs
-# The bundle carries no package metadata, so ship what an image scanner and a licence audit need:
-# the lockfile (for scanners that read lockfiles in images; the release also attests an SBOM generated from
-# it, because syft's image scan does not) and the third-party licence texts.
-COPY --from=builder /src/package.json /src/package-lock.json ./
-COPY --from=builder /src/dist/THIRD_PARTY_LICENSES ./THIRD_PARTY_LICENSES
+COPY --from=builder /out/api /out/ingest /app/
+COPY --from=notices /out/ /app/
+# The lockfile makes an image scan (Trivy, syft) list the compiled crates (a stripped binary carries
+# none); it is inert at runtime. The release also attests a Cargo SBOM of the two binaries.
+COPY Cargo.lock /app/Cargo.lock
+COPY LICENSE /app/LICENSE
 
+# 65532 is distroless's nonroot user (the pod's runAsUser and the volume's fsGroup).
 USER 65532:65532
 EXPOSE 8080
 ENV PORT=8080 DB_PATH=/data/indexer.db
 VOLUME ["/data"]
 
-# The entrypoint is /nodejs/bin/node. node:sqlite is stable in use but still flagged experimental.
-CMD ["--disable-warning=ExperimentalWarning", "/app/main.mjs"]
+# The API by default; the ingester runs as `/app/ingest` (Kubernetes `command:`), and
+# `/app/ingest --healthcheck` is its exec liveness probe.
+CMD ["/app/api"]
