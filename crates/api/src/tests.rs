@@ -608,3 +608,21 @@ fn the_context_follows_the_configuration() {
     let r = handle(&ctx, &req("GET", "/v1/mainnet/coverage", None)).unwrap();
     assert_eq!(r.status, 429); // burst 1, the first request consumed it
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_oversized_request_head_is_refused() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let s = setup();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let Setup { _dir, store: _store, ctx } = s;
+    tokio::spawn(crate::server::serve(listener, Arc::new(ctx), std::future::pending()));
+    let mut sock = tokio::net::TcpStream::connect(addr).await.unwrap();
+    let big = "a".repeat(4 * crate::server::MAX_BUF);
+    let req = format!("GET /readyz HTTP/1.1\r\nHost: x\r\nX-Big: {big}\r\n\r\n");
+    let _ = sock.write_all(req.as_bytes()).await;
+    let mut buf = Vec::new();
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), sock.read_to_end(&mut buf)).await;
+    let head = String::from_utf8_lossy(&buf);
+    assert!(head.starts_with("HTTP/1.1 431") || buf.is_empty(), "{head}");
+}

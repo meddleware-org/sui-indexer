@@ -25,6 +25,12 @@ use crate::log;
 pub const HEADER_TIMEOUT: Duration = Duration::from_secs(5);
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 pub const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
+/// Open connections served at once; further ones wait in the listen backlog until one closes.
+/// Bodies are never read, so a connection costs its read buffer (at most [`MAX_BUF`]) plus a task:
+/// 1024 × 32 KiB bounds header buffering at 32 MiB, inside the container's 128 MiB limit.
+pub const MAX_CONNECTIONS: usize = 1024;
+/// Largest request head buffered (hyper answers `431` beyond it). nginx in front allows 8 KiB lines.
+pub const MAX_BUF: usize = 32 * 1024;
 
 /// All values of `name`, joined by `, ` (how Node.js reports a repeated header).
 fn header(req: &Request<Incoming>, name: &str) -> Option<String> {
@@ -77,9 +83,14 @@ pub async fn bind(port: u16) -> std::io::Result<TcpListener> {
 pub async fn serve(listener: TcpListener, ctx: Arc<ApiContext>, shutdown: impl Future<Output = ()>) {
     let graceful = GracefulShutdown::new();
     let mut builder = http1::Builder::new();
-    builder.timer(TokioTimer::new()).header_read_timeout(HEADER_TIMEOUT);
+    builder.timer(TokioTimer::new()).header_read_timeout(HEADER_TIMEOUT).max_buf_size(MAX_BUF);
+    let slots = Arc::new(tokio::sync::Semaphore::new(MAX_CONNECTIONS));
     tokio::pin!(shutdown);
     loop {
+        let permit = tokio::select! {
+            p = slots.clone().acquire_owned() => p.expect("the semaphore is never closed"),
+            () = &mut shutdown => break,
+        };
         let (stream, peer) = tokio::select! {
             accepted = listener.accept() => match accepted {
                 Ok(a) => a,
@@ -107,6 +118,7 @@ pub async fn serve(listener: TcpListener, ctx: Arc<ApiContext>, shutdown: impl F
         let conn = graceful.watch(conn);
         tokio::spawn(async move {
             let _ = conn.await;
+            drop(permit);
         });
     }
     drop(listener);
