@@ -202,9 +202,20 @@ pub fn grpc_request(req: &ListRequest) -> Result<ListEventsRequest, String> {
     Ok(r)
 }
 
-/// A gRPC status as the message the node sent (its code when it sent none).
+/// A gRPC status as the message the node sent (its code when it sent none), followed by the causes of
+/// a transport error (`tcp connect error: Connection refused (os error 111)`).
 pub fn status_message(s: &tonic::Status) -> String {
-    if s.message().is_empty() { format!("{:?}", s.code()) } else { s.message().to_owned() }
+    let mut out = if s.message().is_empty() { format!("{:?}", s.code()) } else { s.message().to_owned() };
+    let mut cause = std::error::Error::source(s);
+    while let Some(c) = cause {
+        let text = c.to_string();
+        if !out.contains(&text) {
+            out.push_str(": ");
+            out.push_str(&text);
+        }
+        cause = c.source();
+    }
+    out
 }
 
 /// The full node over gRPC (`sui_rpc::Client`: TLS with the webpki roots, HTTP/2).

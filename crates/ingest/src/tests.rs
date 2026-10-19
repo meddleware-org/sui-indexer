@@ -696,7 +696,9 @@ async fn the_grpc_source_reads_list_events_frames_and_the_chain_identifier() {
 async fn an_unreachable_node_is_an_error_not_a_hang() {
     use crate::source::GrpcSource;
     let source = GrpcSource::new("http://127.0.0.1:9").unwrap();
-    assert!(source.chain_identifier().await.is_err());
+    let err = source.chain_identifier().await.unwrap_err();
+    // The cause is named, not only "tcp connect error".
+    assert!(err.to_lowercase().contains("refused"), "{err}");
     assert!(source.list_events(ListRequest { event_type: ag_filter(), after: None, limit: 50 }).await.is_err());
 }
 
