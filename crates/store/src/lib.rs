@@ -313,6 +313,9 @@ impl Store {
 
     fn from_connection(conn: Connection) -> rusqlite::Result<Store> {
         conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA busy_timeout = 5000;")?;
+        // Connection setting, not stored in the file: temporary tables and sorts stay in memory, because
+        // the container's root filesystem (and so /tmp) is read-only.
+        conn.execute_batch("PRAGMA temp_store = MEMORY;")?;
         persist_wal(&conn)?;
         conn.execute_batch(SCHEMA)?;
         let (generation, preexisting) = match get_meta(&conn, "generation")? {
@@ -666,7 +669,8 @@ impl Reader {
         }
         let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX;
         let conn = Connection::open_with_flags(path, flags).map_err(OpenError::Sql)?;
-        conn.execute_batch("PRAGMA query_only = ON; PRAGMA busy_timeout = 5000;").map_err(OpenError::Sql)?;
+        conn.execute_batch("PRAGMA query_only = ON; PRAGMA busy_timeout = 5000; PRAGMA temp_store = MEMORY;")
+            .map_err(OpenError::Sql)?;
         let reader = Reader { conn };
         match reader.generation() {
             Ok(Some(_)) => Ok(reader),
