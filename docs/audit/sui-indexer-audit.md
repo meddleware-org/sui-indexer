@@ -1549,6 +1549,8 @@ All four first-pass questions are decided; none remains open.
     including single-solution fixes under the resolve-inline rule, is to be applied separately, with
     each disposition moved to RESOLVED and the diff cited.
 - 2026-10-18 — released and deployed (`v0.0.10` = `5251f38`, `0.0.10@sha256:b3484ce42a8484383efd598a3f21d3cb7077c7e3d4b73eb0df1c740b221d8a58`), verified live. Cosign keyless signature verified against the workflow-anchored identity (`verify-digests.sh` 16/16); the digest carries two SPDX attestations, the image SBOM (17 packages) and the npm packages SBOM (24 packages), both verified with `cosign verify-attestation --type spdxjson` on 2026-10-18 (F18 post-release check closed); rollout succeeded; `/healthz` ok on the same database generation `e32e37afbbe9` (re-read 2026-10-18). F19 (client change), F3 volume backup, the Cloudflare zone rule and the external review remain open.
+- 2026-10-19 — dependency-bot status checked (read-only): `.github/dependabot.yml` carries the `ignore` rules and the repository has no open Dependabot pull requests (`gh pr list`, 2026-10-19). Versions, findings and gates were not re-examined in this pass.
+  - Dependabot policy encoded in .github/dependabot.yml (majors declined); open PRs merged 2026-10-19
 
 ## Pre-save consistency checklist (this pass)
 
