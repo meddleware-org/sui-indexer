@@ -72,13 +72,6 @@ async fn custom_plan(s: &Store, stream: Stream, query: &PageQuery) -> String {
     text_rows(s, &format!("EXPLAIN (COSTS OFF) {}", inline(stream, query))).await
 }
 
-/// The generic plan (parameters unknown): what a prepared statement settles on after a few executions
-/// (`plan_cache_mode = auto`), the case where a value-specific plan can no longer save a bad shape.
-async fn generic_plan(s: &Store, stream: Stream, query: &PageQuery) -> String {
-    let (sql, _) = page_sql(stream, query);
-    text_rows(s, &format!("EXPLAIN (COSTS OFF, GENERIC_PLAN) {sql}")).await
-}
-
 /// Buffers touched (hit + read, of the root node: the whole query) and rows removed by filters, from
 /// `EXPLAIN (ANALYZE, BUFFERS)`.
 async fn cost(s: &Store, query: &PageQuery) -> (i64, i64, String) {
@@ -127,12 +120,10 @@ async fn the_api_answers_without_events_kind_and_the_index_is_in_the_first_migra
     // The index serves only speed: the read-only API (which cannot create one) answers without it.
     db.admin().await.batch_execute("DROP INDEX events_kind").await.unwrap();
     let r = db.reader(1);
-    let session = r.session().await.unwrap();
-    let all = session.page(STREAM, &q(&["AccessMinted", "AccessConsumed"], None, None)).await.unwrap();
-    let one = session.page(STREAM, &q(&["AccessMinted"], None, None)).await.unwrap();
+    let all = r.events(STREAM, &q(&["AccessMinted", "AccessConsumed"], None, None)).await.unwrap().page;
+    let one = r.events(STREAM, &q(&["AccessMinted"], None, None)).await.unwrap().page;
     assert_eq!((all.rows.len(), one.rows.len()), (1, 1));
-    assert!(session.try_write().await.is_err());
-    session.end().await;
+    assert!(r.try_write().await.is_err());
 }
 
 #[tokio::test]
@@ -251,47 +242,55 @@ async fn merged_kind_seeks_return_what_the_filter_returns() {
     }
 }
 
-/// A generic plan (parameters unknown) of the one-kind query walks the primary key backward and filters:
-/// right for a common kind, a walk of the whole table for a rare one. PostgreSQL switches a prepared
-/// statement to a generic plan after five executions when its estimate looks no worse, so the API's pooled
-/// connections force custom plans (the values known, the statistics used).
+/// One statement serves every kind (`kind = $3`). Its GENERIC plan (parameters unknown) walks the primary key
+/// backward with a filter (`EXPLAIN (GENERIC_PLAN)` shows it), which is right for a common kind and a walk of
+/// the table for a rare one. PostgreSQL's `plan_cache_mode = auto` adopts a generic plan after five executions
+/// when it estimates it no worse than the custom ones; on the data of these tests it does not, but that is a
+/// cost estimate on today's statistics, not a guarantee. The API's pooled connections therefore force custom
+/// plans (the values known, the statistics used): after any number of executions with a common kind, a rare
+/// kind still uses its index. (Protocol-level prepared statements are not listed in `pg_prepared_statements`,
+/// so the same statement is prepared with SQL `PREPARE` on a connection set up like the pool's.)
 #[tokio::test]
-async fn pooled_statements_never_switch_to_a_generic_plan() {
+async fn pooled_connections_use_custom_plans_so_a_rare_kind_keeps_its_index() {
     let db = require_db!();
     let s = db.store().await;
-    fill(&s, 20_000).await;
-    let r = db.reader(1);
-    for query in [
-        q(&["AccessConsumed"], None, None),
-        q(&["AccessConsumed", "GateCreated"], None, None),
-        q(&[], Some(gate(7)), None),
-    ] {
-        for _ in 0..12 {
-            let session = r.session().await.unwrap();
-            assert!(!session.page(STREAM, &query).await.unwrap().rows.is_empty());
-            session.end().await;
-        }
+    fill(&s, 50_000).await;
+    let (sql, args) = page_sql(STREAM, &q(&["AccessConsumed"], None, None));
+    assert_eq!(args.len(), 3);
+    let c = db.owner.connect().await.unwrap();
+    c.batch_execute(crate::reader::SESSION_SETUP).await.unwrap();
+    c.batch_execute(&format!("PREPARE p(text, bigint, text) AS {sql}")).await.unwrap();
+    for _ in 0..12 {
+        c.batch_execute("EXECUTE p('access-gate', 21, 'AccessMinted')").await.unwrap();
     }
-    let session = r.session().await.unwrap();
-    assert_eq!(session.query_for_test("SHOW plan_cache_mode").await, "force_custom_plan");
-    // Twelve executions of each statement on one pooled connection (past the five after which `auto`
-    // would consider a generic plan), none of them generic.
-    assert_eq!(
-        session.query_for_test("SELECT coalesce(sum(generic_plans), 0)::text FROM pg_prepared_statements").await,
-        "0"
-    );
-    assert!(
-        session
-            .query_for_test("SELECT sum(custom_plans)::text FROM pg_prepared_statements")
-            .await
-            .parse::<i64>()
-            .unwrap()
-            >= 36
-    );
-    session.end().await;
-    // The hazard being avoided, for the record: the generic plan of the one-kind query.
-    let generic = generic_plan(&s, STREAM, &q(&["AccessConsumed"], None, None)).await;
+    let r = c
+        .query_one("SELECT generic_plans, custom_plans FROM pg_prepared_statements WHERE name = 'p'", &[])
+        .await
+        .unwrap();
+    assert_eq!((r.get::<_, i64>(0), r.get::<_, i64>(1)), (0, 12));
+    let plan = c
+        .simple_query(
+            "EXPLAIN (ANALYZE, BUFFERS, COSTS OFF, TIMING OFF) EXECUTE p('access-gate', 21, 'AccessConsumed')",
+        )
+        .await
+        .unwrap()
+        .iter()
+        .filter_map(|m| match m {
+            tokio_postgres::SimpleQueryMessage::Row(r) => r.get(0).map(str::to_owned),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(plan.contains("events_kind") && !plan.contains("Rows Removed by Filter"), "{plan}");
+    // The generic plan, for the record: the hazard the setting removes.
+    let generic = text_rows(&s, &format!("EXPLAIN (COSTS OFF, GENERIC_PLAN) {sql}")).await;
     assert!(generic.contains("events_pkey") || generic.contains("events_kind"), "{generic}");
+    // And the pool really applies that setup to its connections.
+    let r = db.reader(1);
+    for _ in 0..8 {
+        assert!(!r.events(STREAM, &q(&["AccessConsumed"], None, None)).await.unwrap().page.rows.is_empty());
+    }
+    assert_eq!(r.query_for_test("SHOW plan_cache_mode").await, "force_custom_plan");
 }
 
 /// F25: a rare kind costs its own rows, not the stream's.
@@ -351,11 +350,42 @@ async fn measurement_on_300k_rows() {
         let t = std::time::Instant::now();
         let mut n = 0u32;
         while t.elapsed().as_millis() < 2000 {
-            let session = r.session().await.unwrap();
-            assert!(!session.page(STREAM, &query).await.unwrap().rows.is_empty());
-            session.end().await;
+            assert!(!r.events(STREAM, &query).await.unwrap().page.rows.is_empty());
             n += 1;
         }
         println!("{label}: {:.0} pages/s (one connection, sequential)", f64::from(n) / t.elapsed().as_secs_f64());
+    }
+}
+
+/// The statement an events request runs (facts + page) uses the same indexes as the page alone, and never
+/// walks the table, for every filter shape.
+#[tokio::test]
+async fn the_events_statement_keeps_the_intended_index_for_every_shape() {
+    let db = require_db!();
+    let s = db.store().await;
+    fill(&s, 30_000).await;
+    let g = Some(gate(7));
+    for (name, query, index) in [
+        ("one kind", q(&["AccessConsumed"], None, None), "events_kind"),
+        ("two kinds", q(&["AccessConsumed", "GateCreated"], None, Some(100)), "events_kind"),
+        ("gate", q(&[], g.clone(), None), "events_gate"),
+        ("gate and kinds", q(&["AccessMinted", "AccessConsumed"], g, Some(100)), "events_gate"),
+    ] {
+        let (mut sql, args) = crate::read::events_sql(STREAM, &query);
+        for (i, a) in args.iter().enumerate().rev() {
+            sql = sql.replace(&format!("${}", i + 1), &a.literal());
+        }
+        let plan = text_rows(&s, &format!("EXPLAIN (COSTS OFF) {sql}")).await;
+        assert!(plan.contains(index) && !plan.contains("Seq Scan on events"), "{name}:\n{plan}");
+        // And the cost on 30,000 rows is a handful of buffers, the head's `max(id)` included.
+        let analyzed = text_rows(&s, &format!("EXPLAIN (ANALYZE, BUFFERS, COSTS OFF, TIMING OFF) {sql}")).await;
+        let buffers: i64 = analyzed.lines().find(|l| l.contains("Buffers:")).map_or(0, |l| {
+            l.split_whitespace()
+                .filter_map(|w| {
+                    w.strip_prefix("hit=").or_else(|| w.strip_prefix("read=")).and_then(|n| n.parse::<i64>().ok())
+                })
+                .sum()
+        });
+        assert!(buffers < 300, "{name}: {buffers} buffers\n{analyzed}");
     }
 }

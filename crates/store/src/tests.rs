@@ -547,7 +547,7 @@ async fn a_failed_migration_leaves_nothing_behind() {
     assert!(migrate::run(&mut c).await.unwrap().is_empty());
 }
 
-// ── The API's reader: readiness, read-only, snapshots, pool ───────────────
+// ── The API's reader: readiness, read-only, one statement per request, pool ─
 
 #[tokio::test]
 async fn the_reader_is_not_ready_until_the_writer_has_migrated_and_started() {
@@ -555,7 +555,11 @@ async fn the_reader_is_not_ready_until_the_writer_has_migrated_and_started() {
     let r = db.reader(2);
     // Nothing exists yet: no table.
     assert!(matches!(r.check().await, Err(ReadError::NotReady(_))), "empty database");
-    assert!(matches!(r.session().await, Err(ReadError::NotReady(_))));
+    assert!(matches!(
+        r.events(Stream::AccessGate, &PageQuery { limit: 5, ..Default::default() }).await,
+        Err(ReadError::NotReady(_))
+    ));
+    assert!(matches!(r.coverage().await, Err(ReadError::NotReady(_))));
     // The schema alone (no generation yet) is not ready either.
     let mut c = db.owner.connect().await.unwrap();
     migrate::run(&mut c).await.unwrap();
@@ -567,9 +571,7 @@ async fn the_reader_is_not_ready_until_the_writer_has_migrated_and_started() {
     let s = db.store().await;
     r.check().await.unwrap();
     assert!(r.is_ready());
-    let session = r.session().await.unwrap();
-    assert_eq!(session.generation().await.unwrap().as_deref(), Some(s.generation()));
-    session.end().await;
+    assert_eq!(r.generation().await.unwrap().as_deref(), Some(s.generation()));
 }
 
 #[tokio::test]
@@ -577,11 +579,9 @@ async fn the_reader_cannot_write_cannot_change_the_schema_and_sees_new_commits()
     let db = require_db!();
     let mut s = db.store().await;
     let r = db.reader(2);
-    let session = r.session().await.unwrap();
-    // Refused by the read-only transaction ...
-    let err = session.try_write().await.unwrap_err();
+    // Refused by the read-only default of the pooled connections ...
+    let err = r.try_write().await.unwrap_err();
     assert_eq!(err.sqlstate(), Some("25006"), "{err}");
-    session.end().await;
     // ... and by the grants, even when a client switches the read-only guards off.
     let c = db.api.connect().await.unwrap();
     c.batch_execute("SET default_transaction_read_only = off").await.unwrap();
@@ -603,65 +603,143 @@ async fn the_reader_cannot_write_cannot_change_the_schema_and_sees_new_commits()
         c.query(&format!("SELECT count(*) FROM {t}"), &[]).await.unwrap_or_else(|e| panic!("{t}: {e}"));
     }
     // It sees commits made after it connected.
-    let session = r.session().await.unwrap();
-    assert_eq!(session.coverage(Stream::AccessGate).await.unwrap().events, 0);
-    session.end().await;
+    assert_eq!(r.coverage().await.unwrap().streams[0].1.events, 0);
     s.ingest(Stream::AccessGate, &[minted("0xa", 1, 1, "t")], Some("c")).await.unwrap();
     s.record_poll(Stream::AccessGate, &PollState { last_success_at: 7, last_error: None, last_attempt_at: 7 })
         .await
         .unwrap();
-    let session = r.session().await.unwrap();
-    assert_eq!(session.coverage(Stream::AccessGate).await.unwrap().events, 1);
-    assert_eq!(session.poll_state(Stream::AccessGate).await.unwrap().last_success_at, 7);
-    session.end().await;
+    assert_eq!(r.coverage().await.unwrap().streams[0].1.events, 1);
+    assert_eq!(r.polls().await.unwrap()[0].last_success_at, 7);
 }
 
 #[tokio::test]
-async fn pooled_connections_start_read_only() {
+async fn pooled_connections_start_read_only_and_never_use_a_generic_plan() {
     let db = require_db!();
     let _s = db.store().await;
     let r = db.reader(1);
-    let session = r.session().await.unwrap();
-    // The session is a REPEATABLE READ READ ONLY transaction.
-    let rows = session.query_for_test("SHOW transaction_read_only").await;
-    assert_eq!(rows, "on");
-    let iso = session.query_for_test("SHOW transaction_isolation").await;
-    assert_eq!(iso, "repeatable read");
-    session.end().await;
+    r.check().await.unwrap();
+    assert_eq!(r.query_for_test("SHOW default_transaction_read_only").await, "on");
+    assert_eq!(r.query_for_test("SHOW plan_cache_mode").await, "force_custom_plan");
 }
 
+/// The statement behind an events response reads the facts (generation, newest id, counters) and the page at
+/// once: while a writer commits pages continuously, the newest id is always the id of the first row served.
 #[tokio::test]
-async fn a_session_is_one_snapshot() {
+async fn an_events_response_is_one_snapshot_of_the_head_and_the_page() {
     let db = require_db!();
     let mut s = db.store().await;
     let r = db.reader(2);
-    s.ingest(Stream::AccessGate, &[minted("0xa", 1, 1, "t1")], Some("c1")).await.unwrap();
-    let session = r.session().await.unwrap();
-    assert_eq!(session.coverage(Stream::AccessGate).await.unwrap().events, 1);
-    s.ingest(Stream::AccessGate, &[minted("0xa", 2, 1, "t2")], Some("c2")).await.unwrap();
-    // Same session: the same snapshot, for every read of the request.
-    assert_eq!(session.coverage(Stream::AccessGate).await.unwrap().events, 1);
-    assert_eq!(session.head_id(Stream::AccessGate).await.unwrap(), 1);
-    session.end().await;
-    let session = r.session().await.unwrap();
-    assert_eq!(session.coverage(Stream::AccessGate).await.unwrap().events, 2);
-    session.end().await;
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let reader = {
+        let (stop, r) = (stop.clone(), &r);
+        async move {
+            let mut checked = 0;
+            while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                let snap = r.events(Stream::AccessGate, &PageQuery { limit: 5, ..Default::default() }).await.unwrap();
+                if let Some(first) = snap.page.rows.first() {
+                    assert_eq!(snap.head_id, first.id, "the head id and the page must come from one snapshot");
+                    assert_eq!(snap.coverage.events as usize >= snap.page.rows.len(), true);
+                    // The counters are in the same snapshot as the rows they count.
+                    let n = snap.coverage.events;
+                    assert!(n >= 1);
+                    checked += 1;
+                }
+            }
+            checked
+        }
+    };
+    let writer = async {
+        for i in 0..150 {
+            s.ingest(Stream::AccessGate, &[minted("0xa", i + 1, 1, &format!("w{i}"))], Some("c")).await.unwrap();
+        }
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    };
+    let (checked, ()) = tokio::join!(reader, writer);
+    assert!(checked > 5, "only {checked} snapshots were checked");
+    assert!(s.verify_counters().await.unwrap().is_empty());
+}
+
+/// The statement that answers a request reads exactly what the separate reads read.
+#[tokio::test]
+async fn the_events_statement_equals_the_separate_reads() {
+    let db = require_db!();
+    let mut s = db.store().await;
+    let r = db.reader(2);
+    // Empty first: no row at all must still carry the facts.
+    let snap = r.events(Stream::AccessGate, &PageQuery { limit: 5, ..Default::default() }).await.unwrap();
+    assert_eq!((snap.head_id, snap.page.rows.len(), snap.coverage.events), (0, 0, 0));
+    assert_eq!(snap.generation.as_deref(), Some(s.generation()));
+    assert_eq!(snap.poll, PollState::default());
+    s.ingest(
+        Stream::AccessGate,
+        &(1..=9).map(|i| minted(if i % 2 == 0 { "0xa" } else { "0xb" }, i, 10, &format!("t{i}"))).collect::<Vec<_>>(),
+        Some("c"),
+    )
+    .await
+    .unwrap();
+    s.ingest(Stream::SealedContent, &[ev("SealedContentPublished", "0xa", 20, None, "s1")], Some("s")).await.unwrap();
+    s.record_poll(
+        Stream::AccessGate,
+        &PollState { last_success_at: 42, last_error: Some("e".into()), last_attempt_at: 43 },
+    )
+    .await
+    .unwrap();
+    for q in [
+        PageQuery { limit: 4, ..Default::default() },
+        PageQuery { limit: 4, before_id: Some(6), ..Default::default() },
+        PageQuery { limit: 2, kinds: Some(vec!["AccessMinted".into()]), ..Default::default() },
+        PageQuery { limit: 3, gate_id: Some(addr("0xa")), ..Default::default() },
+        PageQuery { limit: 3, kinds: Some(vec!["AccessMinted".into(), "AccessConsumed".into()]), ..Default::default() },
+        PageQuery { limit: 3, kinds: Some(vec!["AccessBurned".into()]), ..Default::default() },
+    ] {
+        let snap = r.events(Stream::AccessGate, &q).await.unwrap();
+        let page = s.page(Stream::AccessGate, &q).await.unwrap();
+        assert_eq!(snap.page.rows, page.rows, "{q:?}");
+        assert_eq!(snap.page.next, page.next, "{q:?}");
+        assert_eq!(snap.head_id, s.head_id(Stream::AccessGate).await.unwrap());
+        assert_eq!(snap.coverage, s.coverage(Stream::AccessGate).await.unwrap());
+        assert_eq!(snap.poll, s.poll_state(Stream::AccessGate).await.unwrap());
+        assert_eq!(snap.generation.as_deref(), Some(s.generation()));
+    }
+    let sealed = r
+        .events(Stream::SealedContent, &PageQuery { limit: 5, gate_id: Some(addr("0xa")), ..Default::default() })
+        .await
+        .unwrap();
+    assert_eq!(
+        (sealed.page.rows.len(), sealed.head_id, sealed.coverage.events),
+        (1, s.head_id(Stream::SealedContent).await.unwrap(), 1)
+    );
+    // Coverage and gate statements.
+    let cov = r.coverage().await.unwrap();
+    assert_eq!(cov.generation.as_deref(), Some(s.generation()));
+    assert_eq!(cov.streams[0].1, s.coverage(Stream::AccessGate).await.unwrap());
+    assert_eq!(cov.streams[1].1, s.coverage(Stream::SealedContent).await.unwrap());
+    let gate = r.gate(&addr("0xa")).await.unwrap();
+    assert_eq!(gate.stats, s.gate_stats(&addr("0xa")).await.unwrap());
+    assert_eq!(gate.from_checkpoint.as_deref(), Some("1"));
+    let none = r.gate(&addr("0xf")).await.unwrap();
+    assert_eq!((none.stats.counts.len(), none.stats.commission_mist), (0, 0));
 }
 
 #[tokio::test]
-async fn a_cancelled_request_never_returns_a_connection_with_an_open_transaction() {
+async fn a_cancelled_request_leaves_the_pool_usable() {
     let db = require_db!();
-    let _s = db.store().await;
+    let mut s = db.store().await;
+    s.ingest(Stream::AccessGate, &[minted("0xa", 1, 1, "t")], Some("c")).await.unwrap();
     let r = db.reader(1);
-    let session = r.session().await.unwrap();
-    assert_eq!(r.pool_size(), (1, 1));
-    drop(session); // a timeout dropped the request mid-transaction
-    // The pool has one slot: the next session gets a fresh connection (the old one was discarded) in a
-    // clean state, and its first transaction is its own.
-    let session = r.session().await.unwrap();
-    assert_eq!(session.query_for_test("SELECT txid_current_if_assigned()::text IS NULL").await, "t");
-    session.end().await;
-    assert_eq!(r.pool_size().1, 0);
+    r.check().await.unwrap();
+    // One slot: drop in-flight requests at various points; the next ones still get a clean connection.
+    for micros in [1u64, 20, 100, 400] {
+        let _ = tokio::time::timeout(
+            std::time::Duration::from_micros(micros),
+            r.events(Stream::AccessGate, &PageQuery { limit: 5, ..Default::default() }),
+        )
+        .await;
+        let snap = r.events(Stream::AccessGate, &PageQuery { limit: 5, ..Default::default() }).await.unwrap();
+        assert_eq!(snap.page.rows.len(), 1);
+    }
+    // No request ever opens a transaction: nothing can be left open.
+    assert_eq!(r.query_for_test("SELECT (pg_current_xact_id_if_assigned() IS NULL)::text").await, "true");
 }
 
 #[tokio::test]
@@ -672,7 +750,7 @@ async fn an_unreachable_database_is_unavailable_not_a_panic() {
     let url = dead.url_unredacted().replace(&format!(":{}/", dead.port()), ":1/");
     let r = Reader::new(&DatabaseSettings::parse(&url, true).unwrap(), 1).unwrap();
     assert!(matches!(r.check().await, Err(ReadError::Unavailable(_))));
-    assert!(matches!(r.session().await, Err(ReadError::Unavailable(_))));
+    assert!(matches!(r.coverage().await, Err(ReadError::Unavailable(_))));
 }
 
 // ── Roles and TLS ──────────────────────────────────────────────────────────

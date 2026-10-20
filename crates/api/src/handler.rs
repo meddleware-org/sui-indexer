@@ -9,7 +9,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as B64;
 use serde::Serialize;
 use sui_indexer_store::sui::{is_hex_id, normalize_sui_address};
-use sui_indexer_store::{EventRow, PageQuery, ReadError, Reader, Session, StoreError, Stream};
+use sui_indexer_store::{EventRow, EventsSnapshot, PageQuery, ReadError, Reader, Stream};
 
 use crate::query::{Params, canonical_path, canonical_query, distinct_items, is_limit_syntax, normalize_path};
 use crate::ratelimit::{RateLimiter, client_key};
@@ -77,9 +77,10 @@ impl Db {
         Db { reader, last_logged: AtomicI64::new(0) }
     }
 
-    /// Begin a read-only snapshot for one request. End it with [`Session::end`].
-    pub async fn begin(&self) -> Result<Session, HttpError> {
-        self.reader.session().await.map_err(|e| self.http(e))
+    /// Fail with `503` unless the schema is there and the database answers (a query only until the index has been
+    /// found ready once).
+    pub async fn ensure_ready(&self) -> Result<(), HttpError> {
+        self.reader.ensure_ready().await.map_err(|e| self.http(e))
     }
 
     /// Whether the schema is there and the database answers (`/readyz`): always asks the database.
@@ -87,11 +88,14 @@ impl Db {
         self.reader.check().await.map_err(|e| self.http(e))
     }
 
+    /// The reader (one statement per request, see `sui_indexer_store::Reader`).
     pub fn reader(&self) -> &Reader {
         &self.reader
     }
 
-    fn http(&self, e: ReadError) -> HttpError {
+    /// Map a read failure to the answer: `503` for "not there yet" and "cannot reach it" (the cause is logged
+    /// at most every 10 s, never sent), `500` for a failed query.
+    pub fn http(&self, e: ReadError) -> HttpError {
         match e {
             ReadError::NotReady(_) => HttpError::new(503, NOT_READY),
             ReadError::Unavailable(detail) => {
@@ -131,10 +135,6 @@ impl HttpError {
     fn internal(message: String) -> HttpError {
         HttpError { status: 500, message }
     }
-}
-
-fn sql(e: StoreError) -> HttpError {
-    HttpError::internal(e.to_string())
 }
 
 fn base_headers() -> Vec<(&'static str, String)> {
@@ -185,9 +185,9 @@ fn parse_id(raw: Option<&str>, what: &str) -> Result<Option<String>, HttpError> 
     Ok(Some(normalize_sui_address(raw)))
 }
 
-/// Cursor = `<generation>.<row id>` (`^([0-9a-f]{12})\.(\d{1,15})$`); a cursor from another
-/// database generation is refused with 410.
-fn parse_before(raw: Option<&str>, generation: &str) -> Result<Option<i64>, HttpError> {
+/// Cursor = `<generation>.<row id>` (`^([0-9a-f]{12})\.(\d{1,15})$`): its syntax. Whether the generation is the
+/// current one is decided after the database has been read ([`check_generation`]).
+fn parse_cursor(raw: Option<&str>) -> Result<Option<(String, i64)>, HttpError> {
     let Some(raw) = raw else { return Ok(None) };
     let bad = || HttpError::new(400, "before must be a cursor from a previous page");
     let (g, id) = raw.split_once('.').ok_or_else(bad)?;
@@ -196,10 +196,17 @@ fn parse_before(raw: Option<&str>, generation: &str) -> Result<Option<i64>, Http
     if !gen_ok || !id_ok {
         return Err(bad());
     }
-    if g != generation {
-        return Err(HttpError::new(410, "cursor is from an earlier index; start from the newest page"));
+    Ok(Some((g.to_owned(), id.parse().expect("1-15 digits"))))
+}
+
+/// A cursor from another database generation is refused with 410.
+fn check_generation(cursor: &Option<(String, i64)>, generation: &str) -> Result<(), HttpError> {
+    match cursor {
+        Some((g, _)) if g != generation => {
+            Err(HttpError::new(410, "cursor is from an earlier index; start from the newest page"))
+        }
+        _ => Ok(()),
     }
-    Ok(Some(id.parse().expect("1-15 digits")))
 }
 
 #[derive(Serialize)]
@@ -252,39 +259,64 @@ fn etag_matches(header: Option<&str>, etag: &str) -> bool {
     })
 }
 
-async fn events_page(
-    req: &ApiRequest<'_>,
-    stream: Stream,
-    q: PageQuery,
-    r: &Session,
-    generation: &str,
-) -> Result<ApiResponse, HttpError> {
-    let head = q.before_id.is_none();
+/// The response for one events page, from the snapshot the database answered.
+fn events_response(req: &ApiRequest<'_>, before_id: Option<i64>, snap: EventsSnapshot) -> ApiResponse {
+    let generation = snap.generation.unwrap_or_default();
+    let head = before_id.is_none();
     let cache_control = if head { HEAD } else { IMMUTABLE };
-    let etag = match q.before_id {
-        None => format!("\"{generation}-{}\"", r.head_id(stream).await.map_err(sql)?),
+    let etag = match before_id {
+        None => format!("\"{generation}-{}\"", snap.head_id),
         Some(b) => format!("\"{generation}-b{b}\""),
     };
     if etag_matches(req.if_none_match, &etag) {
         let mut headers = base_headers();
         headers.push(("Cache-Control", cache_control.into()));
         headers.push(("ETag", etag));
-        return Ok(ApiResponse { status: 304, headers, body: String::new() });
+        return ApiResponse { status: 304, headers, body: String::new() };
     }
-    // The three reads are independent: one round trip on the session's connection.
-    let (page, coverage, poll) = tokio::try_join!(r.page(stream, &q), r.coverage(stream), async {
-        if head { r.poll_state(stream).await.map(Some) } else { Ok(None) }
-    })
-    .map_err(sql)?;
-    let polled = poll.map(|p| if p.last_success_at == 0 { None } else { Some(p.last_success_at) });
+    let polled = head.then(|| if snap.poll.last_success_at == 0 { None } else { Some(snap.poll.last_success_at) });
     let body = EventsPage {
-        events: page.rows.iter().map(serialize_row).collect(),
-        cursor: page.next.map(|n| format!("{generation}.{n}")),
-        indexed_from_checkpoint: coverage.from_checkpoint,
-        latest_checkpoint: head.then_some(coverage.latest_checkpoint),
+        events: snap.page.rows.iter().map(serialize_row).collect(),
+        cursor: snap.page.next.map(|n| format!("{generation}.{n}")),
+        indexed_from_checkpoint: snap.coverage.from_checkpoint,
+        latest_checkpoint: head.then_some(snap.coverage.latest_checkpoint),
         polled_at: polled,
     };
-    Ok(json(200, &body, vec![("Cache-Control", cache_control.into()), ("ETag", etag)]))
+    json(200, &body, vec![("Cache-Control", cache_control.into()), ("ETag", etag)])
+}
+
+/// One events route: the order of checks is the SQLite API's (not ready `503`, then the cursor's syntax `400`,
+/// then its generation `410`, then the limit `400`), with one statement answering generation, head and page.
+async fn events_route(
+    ctx: &ApiContext,
+    req: &ApiRequest<'_>,
+    stream: Stream,
+    q: &Params,
+    (kinds, gate_id): (Option<Vec<String>>, Option<String>),
+    (default_limit, max_limit): (u32, u32),
+) -> Result<ApiResponse, HttpError> {
+    ctx.db.ensure_ready().await?;
+    let cursor = parse_cursor(q.get("before"))?;
+    let limit = match parse_limit(q.get("limit"), default_limit, max_limit) {
+        Ok(l) => l,
+        Err(bad_limit) => {
+            // A cursor of another generation is `410` whatever the limit: ask the generation first.
+            if cursor.is_some() {
+                let generation = ctx.db.reader().generation().await.map_err(|e| ctx.db.http(e))?.unwrap_or_default();
+                check_generation(&cursor, &generation)?;
+            }
+            return Err(bad_limit);
+        }
+    };
+    let before_id = cursor.as_ref().map(|(_, id)| *id);
+    let snap = ctx
+        .db
+        .reader()
+        .events(stream, &PageQuery { kinds, gate_id, before_id, limit })
+        .await
+        .map_err(|e| ctx.db.http(e))?;
+    check_generation(&cursor, snap.generation.as_deref().unwrap_or_default())?;
+    Ok(events_response(req, before_id, snap))
 }
 
 #[derive(Serialize)]
@@ -346,36 +378,17 @@ struct ReadyBody<'a> {
     error: Option<&'a str>,
 }
 
-async fn stream_coverage(r: &Session, s: Stream) -> Result<StreamCoverage, HttpError> {
-    let (c, h) = tokio::try_join!(r.coverage(s), r.health(s)).map_err(sql)?;
-    Ok(StreamCoverage {
-        from_checkpoint: c.from_checkpoint,
-        latest_checkpoint: c.latest_checkpoint,
-        events: c.events,
-        undecodable: h.undecodable,
-        gaps: h.gaps,
-    })
-}
-
 async fn healthz(ctx: &ApiContext) -> ApiResponse {
     let now = (ctx.now)();
     let limit = i64::try_from(ctx.poll_ms.saturating_mul(5)).unwrap_or(i64::MAX);
-    let read = async {
-        let r = ctx.db.begin().await?;
-        let polls =
-            tokio::try_join!(r.poll_state(Stream::AccessGate), r.poll_state(Stream::SealedContent)).map_err(sql);
-        r.end().await;
-        let (a, b) = polls?;
-        let one = |h: sui_indexer_store::PollState| {
-            let age = (h.last_success_at != 0).then(|| now - h.last_success_at);
-            StreamHealthJson { ok: age.is_some_and(|a| a < limit), last_poll_age_ms: age, last_error: h.last_error }
-        };
-        Ok::<_, HttpError>(Streams { access_gate: one(a), sealed_content: one(b) })
+    let one = |h: sui_indexer_store::PollState| {
+        let age = (h.last_success_at != 0).then(|| now - h.last_success_at);
+        StreamHealthJson { ok: age.is_some_and(|a| a < limit), last_poll_age_ms: age, last_error: h.last_error }
     };
-    let streams = match read.await {
-        Ok(s) => s,
+    let streams = match ctx.db.reader().polls().await {
+        Ok([a, b]) => Streams { access_gate: one(a), sealed_content: one(b) },
         Err(e) => {
-            let msg = e.message;
+            let msg = ctx.db.http(e).message;
             let down = || StreamHealthJson { ok: false, last_poll_age_ms: None, last_error: Some(msg.clone()) };
             Streams { access_gate: down(), sealed_content: down() }
         }
@@ -416,19 +429,24 @@ async fn route(ctx: &ApiContext, req: &ApiRequest<'_>, pathname: &str, q: &Param
 
     if rest == "coverage" {
         only_params(q, &[])?;
-        let r = ctx.db.begin().await?;
-        let out = async {
-            let (generation, access_gate, sealed_content) = tokio::try_join!(
-                async { Ok(r.generation().await.map_err(sql)?.unwrap_or_default()) },
-                stream_coverage(&r, Stream::AccessGate),
-                stream_coverage(&r, Stream::SealedContent)
-            )?;
-            let body = CoverageBody { network: &ctx.network, generation: &generation, access_gate, sealed_content };
-            Ok(json(200, &body, vec![("Cache-Control", HEAD.into())]))
-        }
-        .await;
-        r.end().await;
-        return out;
+        ctx.db.ensure_ready().await?;
+        let snap = ctx.db.reader().coverage().await.map_err(|e| ctx.db.http(e))?;
+        let [(_, ag_cov, ag_health), (_, sc_cov, sc_health)] = snap.streams;
+        let cov = |c: sui_indexer_store::Coverage, h: sui_indexer_store::StreamHealth| StreamCoverage {
+            from_checkpoint: c.from_checkpoint,
+            latest_checkpoint: c.latest_checkpoint,
+            events: c.events,
+            undecodable: h.undecodable,
+            gaps: h.gaps,
+        };
+        let generation = snap.generation.unwrap_or_default();
+        let body = CoverageBody {
+            network: &ctx.network,
+            generation: &generation,
+            access_gate: cov(ag_cov, ag_health),
+            sealed_content: cov(sc_cov, sc_health),
+        };
+        return Ok(json(200, &body, vec![("Cache-Control", HEAD.into())]));
     }
 
     if rest == "access-gate/events" {
@@ -450,54 +468,29 @@ async fn route(ctx: &ApiContext, req: &ApiRequest<'_>, pathname: &str, q: &Param
             }
         };
         let gate_id = parse_id(q.get("gate"), "gate")?;
-        let r = ctx.db.begin().await?;
-        let out = async {
-            let generation = r.generation().await.map_err(sql)?.unwrap_or_default();
-            let before_id = parse_before(q.get("before"), &generation)?;
-            let limit = parse_limit(q.get("limit"), 20, 100)?;
-            events_page(req, Stream::AccessGate, PageQuery { kinds, gate_id, before_id, limit }, &r, &generation).await
-        }
-        .await;
-        r.end().await;
-        return out;
+        return events_route(ctx, req, Stream::AccessGate, q, (kinds, gate_id), (20, 100)).await;
     }
 
     if rest == "sealed-content" {
         only_params(q, &["gate", "before", "limit"])?;
         let gate_id = parse_id(q.get("gate"), "gate")?.ok_or_else(|| HttpError::new(400, "gate is required"))?;
-        let r = ctx.db.begin().await?;
-        let out = async {
-            let generation = r.generation().await.map_err(sql)?.unwrap_or_default();
-            let before_id = parse_before(q.get("before"), &generation)?;
-            let limit = parse_limit(q.get("limit"), 50, 200)?;
-            let q = PageQuery { kinds: None, gate_id: Some(gate_id), before_id, limit };
-            events_page(req, Stream::SealedContent, q, &r, &generation).await
-        }
-        .await;
-        r.end().await;
-        return out;
+        return events_route(ctx, req, Stream::SealedContent, q, (None, Some(gate_id)), (50, 200)).await;
     }
 
     if parts.len() == 5 && parts[2] == "gates" && parts[4] == "stats" {
         only_params(q, &[])?;
         let gate_id = parse_id(Some(parts[3]), "gate id")?.ok_or_else(|| HttpError::new(400, "gate id is required"))?;
-        let r = ctx.db.begin().await?;
-        let out = async {
-            let (stats, coverage) =
-                tokio::try_join!(r.gate_stats(&gate_id), r.coverage(Stream::AccessGate)).map_err(sql)?;
-            let body = StatsBody {
-                minted: stats.count("AccessMinted"),
-                consumed: stats.count("AccessConsumed"),
-                burned: stats.count("AccessBurned"),
-                commission_mist: stats.commission_mist.to_string(),
-                indexed_from_checkpoint: coverage.from_checkpoint,
-                gate_id,
-            };
-            Ok(json(200, &body, vec![("Cache-Control", HEAD.into())]))
-        }
-        .await;
-        r.end().await;
-        return out;
+        ctx.db.ensure_ready().await?;
+        let snap = ctx.db.reader().gate(&gate_id).await.map_err(|e| ctx.db.http(e))?;
+        let body = StatsBody {
+            minted: snap.stats.count("AccessMinted"),
+            consumed: snap.stats.count("AccessConsumed"),
+            burned: snap.stats.count("AccessBurned"),
+            commission_mist: snap.stats.commission_mist.to_string(),
+            indexed_from_checkpoint: snap.from_checkpoint,
+            gate_id,
+        };
+        return Ok(json(200, &body, vec![("Cache-Control", HEAD.into())]));
     }
 
     Err(HttpError::new(404, "not found"))

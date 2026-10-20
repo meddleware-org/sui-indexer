@@ -1,14 +1,16 @@
 //! The read side the API uses: a small connection pool over the SELECT-only role.
 //!
+//! - **One statement per request, one snapshot.** Every request is answered by a single SQL statement (the
+//!   events page and the facts its response carries are one `SELECT`; see `read::events_sql`), so what a
+//!   response says is consistent without a transaction, costs one round trip, and can never leave a pooled
+//!   connection inside an open transaction (a cancelled request leaves nothing behind).
 //! - **Read-only twice.** The database role has no write grant and `default_transaction_read_only = on`;
-//!   in addition every pooled connection starts with `SET default_transaction_read_only = on`, and every
-//!   request runs inside `BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY`, so several reads see one
-//!   snapshot (as the SQLite read transaction did).
+//!   in addition every pooled connection starts with `SET default_transaction_read_only = on`.
 //! - **Never migrates.** The API role cannot run DDL. [`Reader::check`] reports `NotReady` until
 //!   `schema_migrations` is at [`SCHEMA_VERSION`] (or newer: migrations keep the previous queries
 //!   working) and the ingester has written the generation.
-//! - **Cancellation-safe.** A [`Session`] dropped without [`Session::end`] (a request timed out
-//!   mid-transaction) discards its connection instead of returning it to the pool with a transaction open.
+//! - **Custom plans.** Pooled connections force `plan_cache_mode = force_custom_plan`: a generic plan of the
+//!   one-kind page walks the primary key, right for a common kind and a table walk for a rare one.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -19,8 +21,12 @@ use tokio_postgres::NoTls;
 use crate::db::DatabaseSettings;
 use crate::error::{Result, StoreError};
 use crate::migrate::SCHEMA_VERSION;
-use crate::read;
-use crate::{Coverage, GateStats, Page, PageQuery, PollState, Stream, StreamHealth};
+use crate::read::{self, CoverageSnapshot, EventsSnapshot, GateSnapshot};
+use crate::{PageQuery, PollState, Stream};
+
+/// What every pooled connection runs when it is created.
+pub(crate) const SESSION_SETUP: &str =
+    "SET default_transaction_read_only = on; SET plan_cache_mode = force_custom_plan";
 
 /// How long a request waits for a free pooled connection before the API answers 503.
 pub const POOL_WAIT: Duration = Duration::from_secs(3);
@@ -54,10 +60,16 @@ impl From<StoreError> for ReadError {
     }
 }
 
-impl From<tokio_postgres::Error> for ReadError {
-    fn from(e: tokio_postgres::Error) -> Self {
-        ReadError::Store(StoreError::Pg(e))
+/// An error and its causes, `a: b: c` (the pool's own message hides why a connection failed).
+fn chain(e: &dyn std::error::Error) -> String {
+    let mut out = e.to_string();
+    let mut source = e.source();
+    while let Some(s) = source {
+        out.push_str(": ");
+        out.push_str(&s.to_string());
+        source = s.source();
     }
+    out
 }
 
 /// The API's handle on the database: a lazily connecting pool.
@@ -83,28 +95,24 @@ impl Reader {
             .recycle_timeout(Some(Duration::from_secs(2)))
             .runtime(Runtime::Tokio1)
             .post_create(Hook::async_fn(|client, _| {
-                Box::pin(async move {
-                    client
-                        .batch_execute(
-                            "SET default_transaction_read_only = on; SET plan_cache_mode = force_custom_plan",
-                        )
-                        .await
-                        .map_err(HookError::Backend)
-                })
+                Box::pin(async move { client.batch_execute(SESSION_SETUP).await.map_err(HookError::Backend) })
             }))
             .build()
             .map_err(|e| StoreError::Config(format!("cannot build the connection pool: {e}")))?;
         Ok(Reader { pool, ready: AtomicBool::new(false) })
     }
 
+    /// A pooled connection, once the index is known to be ready (the schema is checked until it has been
+    /// found ready once: a ready index stays ready, a migration only adds).
     async fn conn(&self) -> std::result::Result<Object, ReadError> {
-        self.pool.get().await.map_err(|e| ReadError::Unavailable(e.to_string()))
+        self.ensure_ready().await?;
+        self.pool.get().await.map_err(|e| ReadError::Unavailable(chain(&e)))
     }
 
     /// Whether the schema is there at the version this build needs and the ingester has recorded a
     /// generation. Always asks the database (`/readyz`).
     pub async fn check(&self) -> std::result::Result<(), ReadError> {
-        let conn = self.conn().await?;
+        let conn = self.pool.get().await.map_err(|e| ReadError::Unavailable(chain(&e)))?;
         let rows = match conn
             .query(
                 "SELECT (SELECT max(version) FROM schema_migrations), (SELECT value FROM meta WHERE key = 'generation')",
@@ -117,7 +125,7 @@ impl Reader {
                 self.ready.store(false, Ordering::Relaxed);
                 return Err(ReadError::NotReady("schema not created yet".into()));
             }
-            Err(e) => return Err(e.into()),
+            Err(e) => return Err(StoreError::Pg(e).into()),
         };
         let version: Option<i32> = rows[0].get(0);
         let generation: Option<String> = rows[0].get(1);
@@ -139,69 +147,54 @@ impl Reader {
         self.ready.load(Ordering::Relaxed)
     }
 
-    /// Begin a read-only snapshot on a pooled connection. Checks readiness first until it has once
-    /// succeeded (a ready index stays ready: a migration only adds).
-    pub async fn session(&self) -> std::result::Result<Session, ReadError> {
-        if !self.is_ready() {
-            self.check().await?;
-        }
+    /// Fail with `NotReady`/`Unavailable` unless the index can be read (no query once it has been found ready).
+    pub async fn ensure_ready(&self) -> std::result::Result<(), ReadError> {
+        if self.is_ready() { Ok(()) } else { self.check().await }
+    }
+
+    /// The current generation (the ingester rotates it on a confirmed reindex).
+    pub async fn generation(&self) -> std::result::Result<Option<String>, ReadError> {
         let conn = self.conn().await?;
-        conn.batch_execute("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY").await?;
-        Ok(Session { conn: Some(conn) })
+        Ok(read::meta(&**conn, "generation").await?)
     }
 
-    /// Connections open now and in use (monitoring and tests).
-    pub fn pool_size(&self) -> (usize, usize) {
-        let s = self.pool.status();
-        (s.size, s.size.saturating_sub(s.available))
-    }
-}
-
-/// One read-only snapshot of the index. End it with [`Session::end`].
-pub struct Session {
-    conn: Option<Object>,
-}
-
-impl Session {
-    fn c(&self) -> &Object {
-        self.conn.as_ref().expect("the session is open")
+    /// One page of `stream` with the facts the response carries (the newest id for the ETag, the stream's
+    /// counters, its poll heartbeat, the generation), all from one statement.
+    pub async fn events(&self, stream: Stream, q: &PageQuery) -> std::result::Result<EventsSnapshot, ReadError> {
+        let conn = self.conn().await?;
+        Ok(read::events(&**conn, stream, q).await?)
     }
 
-    /// The current generation (read per request: the ingester rotates it on a confirmed reindex).
-    pub async fn generation(&self) -> Result<Option<String>> {
-        read::meta(&**self.c(), "generation").await
-    }
-    pub async fn page(&self, stream: Stream, q: &PageQuery) -> Result<Page> {
-        read::page(&**self.c(), stream, q).await
-    }
-    pub async fn head_id(&self, stream: Stream) -> Result<i64> {
-        read::head_id(&**self.c(), stream).await
-    }
-    pub async fn coverage(&self, stream: Stream) -> Result<Coverage> {
-        read::coverage(&**self.c(), stream).await
-    }
-    pub async fn health(&self, stream: Stream) -> Result<StreamHealth> {
-        read::health(&**self.c(), stream).await
-    }
-    pub async fn gate_stats(&self, gate_id: &str) -> Result<GateStats> {
-        read::gate_stats(&**self.c(), gate_id).await
-    }
-    pub async fn poll_state(&self, stream: Stream) -> Result<PollState> {
-        read::poll_state(&**self.c(), stream).await
-    }
-    pub async fn meta(&self, key: &str) -> Result<Option<String>> {
-        read::meta(&**self.c(), key).await
+    /// The generation and both streams' counters, from one statement.
+    pub async fn coverage(&self) -> std::result::Result<CoverageSnapshot, ReadError> {
+        let conn = self.conn().await?;
+        Ok(read::coverage_snapshot(&**conn).await?)
     }
 
-    /// Attempt a write through this connection (it must fail: tests).
+    /// One gate's counters and commission, and where coverage starts, from one statement.
+    pub async fn gate(&self, gate_id: &str) -> std::result::Result<GateSnapshot, ReadError> {
+        let conn = self.conn().await?;
+        Ok(read::gate_snapshot(&**conn, gate_id).await?)
+    }
+
+    /// Both streams' poll heartbeats (`/healthz`), from one statement.
+    pub async fn polls(&self) -> std::result::Result<[PollState; 2], ReadError> {
+        let conn = self.conn().await?;
+        Ok(read::poll_states(&**conn).await?)
+    }
+
+    /// Attempt a write through a pooled connection (it must fail: tests).
+    #[cfg(any(test, feature = "testing"))]
     pub async fn try_write(&self) -> Result<u64> {
-        Ok(self.c().execute("INSERT INTO meta (key, value) VALUES ('probe', 'x')", &[]).await?)
+        let conn = self.conn().await.map_err(|e| StoreError::Data(e.to_string()))?;
+        Ok(conn.execute("INSERT INTO meta (key, value) VALUES ('probe', 'x')", &[]).await?)
     }
 
-    /// Run `sql` and return the first column of the first row as text (tests).
+    /// Run `sql` on a pooled connection and return the first column of the first row as text (tests).
     #[cfg(any(test, feature = "testing"))]
     pub async fn query_for_test(&self, sql: &str) -> String {
-        let rows = self.c().simple_query(sql).await.expect("query");
+        let conn = self.pool.get().await.expect("a pooled connection");
+        let rows = conn.simple_query(sql).await.expect("query");
         rows.iter()
             .find_map(|m| match m {
                 tokio_postgres::SimpleQueryMessage::Row(r) => r.get(0).map(str::to_owned),
@@ -210,23 +203,9 @@ impl Session {
             .unwrap_or_default()
     }
 
-    /// End the snapshot and return the connection to the pool. If the connection cannot be reset it is
-    /// discarded instead.
-    pub async fn end(mut self) {
-        if let Some(conn) = self.conn.take()
-            && conn.batch_execute("COMMIT").await.is_err()
-        {
-            drop(Object::take(conn));
-        }
-    }
-}
-
-impl Drop for Session {
-    fn drop(&mut self) {
-        // Reached without `end`: the request was cancelled (timeout, client gone) or failed with the
-        // transaction open. The connection must not go back to the pool in that state.
-        if let Some(conn) = self.conn.take() {
-            drop(Object::take(conn));
-        }
+    /// Connections open now and in use (monitoring and tests).
+    pub fn pool_size(&self) -> (usize, usize) {
+        let s = self.pool.status();
+        (s.size, s.size.saturating_sub(s.available))
     }
 }

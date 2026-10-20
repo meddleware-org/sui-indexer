@@ -32,7 +32,8 @@ use serde::{Deserialize, Serialize};
 pub use db::DatabaseSettings;
 pub use error::{Result, StoreError};
 pub use migrate::SCHEMA_VERSION;
-pub use reader::{ReadError, Reader, Session};
+pub use read::{CoverageSnapshot, EventsSnapshot, GateSnapshot};
+pub use reader::{ReadError, Reader};
 pub use writer::{ConnectOptions, INDEX_TABLES, Store, WRITER_LOCK_KEY, read_alive};
 
 /// An event stream this indexer keeps.

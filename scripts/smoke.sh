@@ -130,10 +130,9 @@ grep -q 'writer lock' <<< "$second" || { echo "second ingester refused without n
 
 # 6. Role separation, whatever the processes do: the API's role cannot write or change the schema.
 api_psql() { PGPASSWORD="$api_pw" "$docker" exec -i -e PGPASSWORD "$pgname" psql -X -q -At -h 127.0.0.1 -U sui_indexer_api -d sui_indexer "$@"; }
-for sql in "SET default_transaction_read_only = off; INSERT INTO meta (key, value) VALUES ('x', 'y')" \
-  "SET default_transaction_read_only = off; CREATE TABLE evil (x int)" \
-  "SET default_transaction_read_only = off; DELETE FROM events"; do
-  if err="$(api_psql -c "$sql" 2>&1)"; then echo "the API role could run: ${sql}" >&2; exit 1; fi
+# (the read-only default is switched off first, as a hostile client could: the grants must still refuse)
+for sql in "INSERT INTO meta (key, value) VALUES ('x', 'y')" "CREATE TABLE evil (x int)" "DELETE FROM events"; do
+  if err="$(api_psql -c "SET default_transaction_read_only = off" -c "$sql" 2>&1)"; then echo "the API role could run: ${sql}" >&2; exit 1; fi
   grep -q 'permission denied' <<< "$err" || { echo "unexpected refusal for '${sql}': ${err}" >&2; exit 1; }
 done
 api_psql -c "SELECT count(*) FROM events" > /dev/null || { echo "the API role cannot read" >&2; exit 1; }

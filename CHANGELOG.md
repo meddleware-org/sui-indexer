@@ -7,6 +7,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.14] - 2026-10-20
+
+### Changed
+
+- **BREAKING (internal): storage moves from embedded SQLite to the platform's shared PostgreSQL tier**
+  (decisions D59, D60; OQ7). The HTTP API is unchanged: every route, status, header, ETag, cursor and error body
+  is byte-identical to 0.0.13's (checked against a real 0.0.13 `api` binary over the same data, 53 routes, and
+  against the live instance, 97 routes).
+  - `crates/store` is rewritten on `tokio-postgres` 0.7.18 (+ `deadpool-postgres` 0.14.2 for the API's pool,
+    `tokio-postgres-rustls` 0.14.0 with `rustls` 0.23.46 and the **ring** provider the gRPC client already
+    uses). Still the only crate with SQL. The schema is the same logical schema (`migrations/0001_init.sql`):
+    `bytea` for BCS, `bigint` for every integer, `numeric(39,0)` for commission totals, `CHECK` and `NOT NULL`
+    where the code relies on them, the same three indexes, and a new `heartbeats` table for the poll and
+    liveness rows (they were `meta` rows).
+  - **Ids are ordered, not gapless.** `events.id` is a `GENERATED ALWAYS AS IDENTITY` column written by one
+    connection; an ignored duplicate or a rolled-back page consumes numbers. Nothing (ETag, cursor, paging)
+    reads an id as a count.
+  - **Versioned migrations** (`schema_migrations`, SHA-256 per migration), applied by the ingester as the
+    database owner at startup under `pg_advisory_xact_lock`. The API cannot run DDL; it answers `503`
+    (`/readyz` 503, `/v1` 503, body `index not created yet`) until the schema is at the version it needs.
+  - **Single writer enforced:** the ingester takes `pg_try_advisory_lock` on its one connection and holds it for
+    the life of the process; a second writer (or the importer) exits non-zero. A lost connection loses the lock,
+    so the ingester stops with a non-zero exit and Kubernetes restarts it.
+  - **Read-only by role.** The API connects as a `SELECT`-only role; additionally every pooled connection is
+    `SET default_transaction_read_only = on` and every request is a `REPEATABLE READ READ ONLY` snapshot (one
+    consistent view per request, as the SQLite read transaction was). Pooled statements force custom plans
+    (`plan_cache_mode = force_custom_plan`): a generic plan of the one-kind page walks the primary key.
+  - **TLS `verify-full` only.** `DATABASE_URL` must carry `sslmode=verify-full` and `sslrootcert`; other modes
+    are refused (local plaintext needs the explicit `ALLOW_INSECURE_DATABASE=1`). An empty password is refused.
+    The URL and password are never logged.
+  - `REINDEX_CONFIRM` is unchanged, but the pre-delete backup is a `bak_<ms>` schema copy
+    (`CREATE TABLE … AS`) in the same transaction as the clearing (restore:
+    `INSERT INTO events OVERRIDING SYSTEM VALUE SELECT * FROM bak_<ms>.events`, and likewise per table).
+  - **No counter backfill and no cutover backup:** the `stats:v2` backfill and the `VACUUM INTO` cutover copy
+    belonged to the SQLite store's upgrade path; every row now enters through `ingest`, which keeps the counters
+    in the same transaction, and the importer copies and re-verifies them.
+  - **The only `unsafe` code is gone** (the persisted-WAL FFI call); `unsafe_code = "deny"` has no exception left.
+- **Two Deployments instead of one pod** (workspace `post-bootstrap/sui-indexer`): `sui-indexer-ingest` (1 replica,
+  no Service, no volume) and `sui-indexer-api` (stateless; more than one replica is safe). Each has its own
+  database role and Secret; NetworkPolicies are per pod.
+- **Configuration:** `DB_PATH` is replaced by `DATABASE_URL`; new `ALLOW_INSECURE_DATABASE` (tests only) and
+  `DB_POOL_SIZE` (API, default 8, 1–64; the ingester uses exactly one connection). Everything else is unchanged.
+- `ingest --healthcheck` now needs the database: it fails when PostgreSQL is unreachable or the liveness
+  heartbeat is older than `5 × POLL_MS + 30 s`. The API's liveness probe becomes a TCP check (a database outage
+  must not restart the API); `/readyz` reports database reachability and the schema version.
+- Tests run against a real PostgreSQL 18 (`TEST_DATABASE_URL`, an isolated database per test provisioned with the
+  production roles; CI sets `REQUIRE_TEST_DATABASE=1` so none can be skipped). `scripts/test-postgres.sh`
+  starts a pinned, TLS-enabled container (docker or rootless podman). Query-plan tests (`EXPLAIN`, custom and
+  buffer counts on 300,000 rows) pin the index use of every filter shape.
+
+### Added
+
+- **Temporary: `ingest import-sqlite <path> [--replace-existing]`**, behind the cargo feature `import-sqlite`
+  (the 0.0.14 image is built with it; SQLite is compiled in for it and for nothing else). It reads a 0.0.13
+  SQLite index read-only and copies it into an empty PostgreSQL index **with the same ids, generation, package
+  bindings, cursors and counters**, in one transaction, verifying row counts per stream, every cursor, the
+  commission total, the largest id, a SHA-256 over `id:tx_digest:event_index` in id order and a recount of the
+  counters before it commits; it prints a report and sets `meta schema_writer = postgres`. A target that already
+  holds data is refused (`--replace-existing` copies it to a `bak_<ms>` schema first). **0.0.15 removes the
+  feature, `rusqlite` and the importer** (tracked in `OPERATOR_TASKS.md` of the infrastructure workspace).
+- `scripts/golden-from-0.0.13.sh` and `tests/golden/0.0.13.json`: the recorded answers of a real 0.0.13 API over
+  the importer's fixture; `crates/api/tests/import_parity.rs` requires the imported index to reproduce them.
+
+### Removed
+
+- `rusqlite`/SQLite from the default build; `DB_PATH`; the data volume; the `-wal`/`-shm` persistence and the one
+  `unsafe` call that did it; the `.bak-pre-rust-*` cutover copy; the counter backfill.
+
+### Security
+
+- Least privilege is enforced by the database (a role without a write grant) instead of by a mount flag and an
+  open mode; the database tier's role/limit/timeout settings bound a runaway client. The ingester and the API
+  hold different credentials. See `SECURITY.md` and the audit (findings F27–F32).
+
 ## [0.0.13] - 2026-10-19
 
 ### Changed
