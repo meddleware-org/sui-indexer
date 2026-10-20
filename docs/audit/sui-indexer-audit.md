@@ -1530,9 +1530,12 @@ limit. Test: *an_oversized_request_head_is_refused*; the cap itself is a constan
   refused by another), *copies_the_index_into_a_backup_schema_…* (the API role cannot read a `bak_` schema); smoke step 6 against the
   real image; and the roles were created by the **real `provision.sh`** against a local PostgreSQL 18 (2026-10-20) for the live-data
   run: the ingester wrote as the owner, the API read as the SELECT-only role.
-- **Residual (workspace, not this repo).** PostgreSQL grants `CONNECT` on the *adopted* auth databases and `postgres` to `PUBLIC`
-  until the tier's opt-in `harden` lines are enabled, so a new role can open a connection there and read catalog metadata (not data); the
-  tier README records it. Enabling the `harden` lines is the operator's choice (it touches the auth databases).
+- **Residual (workspace, not this repo): closed for the auth databases, applied on the cluster 2026-10-20 (provision job: three `hardened … keeps CONNECT` lines; Kratos, Hydra and Keto reconnected afterwards).** PostgreSQL grants `CONNECT` on
+  every database to `PUBLIC` by default, so a new role could open a connection to the adopted auth databases and read catalog metadata (not data).
+  The three `harden` lines of `services.conf` are now enabled (`REVOKE ALL ON DATABASE … FROM PUBLIC`, explicit `CONNECT` for the owner;
+  proved against a local PostgreSQL 18 with the real `init.sh`: the auth owners keep working, `sui_indexer_*` and arbitrary roles are refused, a re-run
+  converges; `k8s/base/database/tests/harden-backup-test.sh`). What remains: the maintenance database `postgres` (and `template1`) still grant
+  `CONNECT` to `PUBLIC`; it holds no data (`harden postgres` is commented in `services.conf`, safe to enable).
 
 ### F28 — Shared fate with the auth PostgreSQL (D59, 2026-10-20)
 
@@ -1633,8 +1636,9 @@ the live-ingest run). **Removal:** 0.0.15 deletes the feature, `rusqlite`, the i
 - Tests: `db::tests` (seven cases incl. *nothing_prints_the_password*, *requires_verify_full_and_a_root_certificate*, *refuses_an_empty_password_unless_insecure*), the config cases
   (*the_database_url_is_required_and_validated_without_echoing_it*), *tls_is_verified_against_the_given_ca_when_the_server_offers_it* (the right CA connects, another CA and a missing or junk file are refused),
   and every database test of the suite runs over `verify-full` against a TLS server with a throwaway CA.
-- Residual (workspace): the tier's server also accepts plaintext connections unless the optional `pg_hba` hardening is applied; this client never sends one. The Ory stack still uses `sslmode=require`
-  (the tier README lists moving it to `verify-full` as a follow-up). A hostname-mismatch refusal is verified by rustls' contract and by the CA test, not by a dedicated test (the test server's certificate carries
+- Residual (workspace): the tier's server also accepts plaintext connections unless the optional `pg_hba` hardening is applied; this client never sends one. The Ory stack used `sslmode=require`; moving it to `verify-full` is
+  applied 2026-10-20 (`pg_stat_ssl` shows ssl=true for the three Ory roles and both indexer roles): Deployments mount `postgres-ca`, `k8s/scripts/set-auth-dsn-tls.sh` rewrites only the DSN parameters, and
+  the real Kratos, Hydra and Keto images were proved against `verify-full` (and refused a wrong CA, a host name outside the SANs and a missing CA). A hostname-mismatch refusal is verified by rustls' contract and by the CA test, not by a dedicated test (the test server's certificate carries
   the names it is reached by).
 
 ---
@@ -2167,7 +2171,8 @@ Every test project that exists runs in CI. Up to 0.0.11: one vitest project (52 
 - **S10** MAY split the events statement into a facts statement and a page statement run in a pipelined transaction to save planning time (about a third of the
   per-request cost, F25) — not taken: it adds a transaction and a cancellation hazard to every request for a gain the edge cache makes immaterial; revisit if the origin ever
   serves uncached traffic at scale.
-- **S11** SHOULD enable the tier's `harden` lines and the TLS-only `pg_hba` (workspace, F27/F32 residuals) and move the Ory stack to `verify-full` — operator choice; touches the auth Postgres.
+- **S11** SHOULD enable the tier's `harden` lines and the TLS-only `pg_hba` (workspace, F27/F32 residuals) and move the Ory stack to `verify-full`. 2026-10-20: the `harden` lines and the `verify-full` move are authored (applied: see log);
+  the TLS-only `pg_hba` component stays an operator choice (it restarts PostgreSQL).
 
 ## Open questions (`OQ#`)
 
@@ -2223,6 +2228,12 @@ The four first-pass questions and OQ5-OQ7 are decided (OQ6 was superseded by OQ7
 ---
 
 ## Re-verification log
+
+- 2026-10-20 — workspace-side database-tier hardening (no change in this repository's code).
+  - **Authored and then applied on the cluster the same day:** `harden` of `kratos_db`, `hydra_db`, `keto_db` (closes the F27 residual
+    for the auth databases), Ory `sslmode=verify-full` (closes the F32 residual), a dedicated `postgres_backup` login for the backup job and a
+    bucket-scoped MinIO user for its uploads. This repository's roles (`sui_indexer_ingest`, `sui_indexer_api`) are unaffected except that they can no longer
+    open the auth databases, and the backup role now reads `sui_indexer` instead of the superuser. Local proofs: `k8s/base/database/tests/`.
 
 - 2026-10-20 — storage moved to the shared PostgreSQL tier in `0.0.14` (local commits on top of `c0ab2fa`; not released, not deployed; D59 revised, D60; OQ7).
   - **Scope:** the Rust workspace re-verified against the new storage (Scope, 2026-10-20 block); the workspace manifests and the cutover runbook
