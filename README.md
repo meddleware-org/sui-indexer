@@ -174,6 +174,17 @@ Container image: `quay.io/meddleware-org/sui-indexer`, built by `docker-publish.
 The tag must match the Cargo workspace version. Deployment manifests live in the infrastructure workspace
 (`post-bootstrap/sui-indexer`).
 
+Release flow (`docker-publish.yml`): each architecture is compiled on its own **native** runner (`ubuntu-latest`
+for amd64, `ubuntu-24.04-arm` for arm64; the earlier single QEMU-emulated build took about 1.5 hours). The builds
+hold no registry credentials: each exports an OCI archive, a short job pushes it as `<commit>-amd64` /
+`<commit>-arm64`, and a merge job builds the multi-arch index (`docker buildx imagetools create`, which keeps
+each architecture's BuildKit provenance), scans it with Trivy **by digest**, then signs it and attaches the
+SBOMs and the build-provenance attestation. Everything (signature, attestations, the self-hosted mirror) is tied
+to that merged index digest. The `<commit>-<arch>` tags are build intermediates and are left in place: deploy by
+the signed index digest, never by those tags. To exercise the pipeline without publishing, run the workflow by
+hand (Actions, "Publish (Docker)", `dry_run` on, the default): it builds both architectures and merges and scans
+them in a throwaway registry on the runner, with no push, no signature and no secret.
+
 ## Licence
 
 BSD Zero Clause (`0BSD`) — see [LICENSE](LICENSE).

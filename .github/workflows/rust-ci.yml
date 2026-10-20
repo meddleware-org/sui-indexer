@@ -86,6 +86,10 @@ jobs:
           CARGO_FEATURES=sui-indexer-ingest/import-sqlite bash scripts/check-sbom.sh \
             crates/ingest/sui-indexer-ingest.cdx.json sui-indexer-ingest
 
+      # The release merges the two native per-architecture images into one index; this gate (used there) is tested here.
+      - name: Index gate tests
+        run: bash scripts/tests/check-index-test.sh
+
       - name: Stop PostgreSQL
         if: always()
         run: bash scripts/test-postgres.sh stop

@@ -37,5 +37,7 @@ scripts/         smoke.sh (image + PostgreSQL), test-postgres.sh (pinned TLS Pos
 ```
 
 Release: bump `version` in `[workspace.package]` of `Cargo.toml` (and `Cargo.lock`), add a CHANGELOG entry,
-push, tag `v<version>`. `docker-publish.yml` checks tag == version, then runs the full CI and builds, signs
-and attests the image.
+push, tag `v<version>`. `docker-publish.yml` checks tag == version, then runs the full CI, builds each
+architecture natively (amd64 and arm64 runners, no QEMU, no registry credentials), merges the two into one index,
+scans it by digest, and signs and attests that digest. The `<commit>-<arch>` tags it leaves are build
+intermediates. A manual run of the workflow is a dry run (nothing is pushed; README, "Release flow").

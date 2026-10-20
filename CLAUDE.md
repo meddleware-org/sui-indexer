@@ -160,3 +160,14 @@ binary and a seeded PostgreSQL), the SBOM gate tests (`scripts/tests/check-sbom-
 test (`scripts/smoke.sh`: PostgreSQL with TLS, the ingester and the API as separate containers, role separation,
 a second ingester refused, database outage and recovery).
 Before a release, run both binaries locally against testnet (README → Development).
+
+## Release
+
+`docker-publish.yml` (tag `v*`): `version` and `verify` (the full `rust-ci.yml`), then per architecture a native
+build (amd64 on `ubuntu-latest`, arm64 on `ubuntu-24.04-arm`, never QEMU) to an OCI archive with no registry
+credentials, `publish-arch` pushes `<commit>-<arch>`, `merge-docker-public` merges the index, runs the Trivy scan
+by digest, signs, attests (image SPDX, the two CycloneDX per-binary SBOMs from `sbom-crates`, build provenance)
+and exports `digest`; `mirror-private` promotes that digest. The `<commit>-<arch>` tags are intermediates and stay.
+`scripts/check-index.sh` asserts the merged index holds both architectures and their provenance. Running the
+workflow by hand is a dry run (`dry_run` input, default on): nothing is pushed or signed. Do not reintroduce
+`setup-qemu-action` for a Rust compile.

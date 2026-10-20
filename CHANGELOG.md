@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Release workflow only (no code or image change, no version bump): `docker-publish.yml` builds amd64 and arm64
+  on native runners instead of one QEMU-emulated build (the 0.0.14 publish took about 1.5 hours). The builds hold
+  no registry credentials; a merge job builds the index, scans it by digest, signs and attests it as before
+  (D61). A manual run is a dry run that publishes nothing. New `scripts/check-index.sh`.
+
 ## [0.0.14] - 2026-10-20
 
 ### Changed
