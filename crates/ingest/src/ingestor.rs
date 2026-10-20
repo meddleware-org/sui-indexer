@@ -5,8 +5,8 @@
 //! - An event that cannot be stored is counted and skipped (the page advances past it).
 //! - A cursor that fell below the node's retention restarts from the node's earliest data instead
 //!   of retrying forever (a counted gap).
-//! - After each stream poll the heartbeat `meta poll:<stream>` is written for the API's `/healthz`,
-//!   and `meta ingest:alive` is refreshed around every request for the exec liveness probe.
+//! - After each stream poll the heartbeat `heartbeats poll:<stream>` is written for the API's `/healthz`,
+//!   and `heartbeats ingest:alive` is refreshed around every request for the exec liveness probe.
 
 use std::time::Duration;
 
@@ -58,14 +58,21 @@ fn idx(stream: Stream) -> usize {
 }
 
 impl<S: EventSource> Ingestor<S> {
-    pub fn new(store: Store, source: S, opts: IngestOptions, log: Logger) -> Ingestor<S> {
+    pub async fn new(store: Store, source: S, opts: IngestOptions, log: Logger) -> Ingestor<S> {
         // Continue from the persisted heartbeats, so a restart does not forget the last success.
-        let state = Stream::ALL.map(|s| store.poll_state(s).unwrap_or_default());
+        let mut state = [PollState::default(), PollState::default()];
+        for s in Stream::ALL {
+            state[idx(s)] = store.poll_state(s).await.unwrap_or_default();
+        }
         Ingestor { store, source, opts, log, state }
     }
 
     pub fn store(&self) -> &Store {
         &self.store
+    }
+
+    pub fn store_mut(&mut self) -> &mut Store {
+        &mut self.store
     }
 
     pub fn source(&self) -> &S {
@@ -82,21 +89,21 @@ impl<S: EventSource> Ingestor<S> {
         self.state.iter().map(|s| s.last_success_at).min().unwrap_or(0)
     }
 
-    fn alive(&self) {
-        if let Err(e) = self.store.touch_alive(now_ms()) {
+    async fn alive(&self) {
+        if let Err(e) = self.store.touch_alive(now_ms()).await {
             (self.log)(&format!("liveness heartbeat failed: {e}"));
         }
     }
 
     /// Read one stream up to the page budget. Returns the number of new events.
-    pub async fn poll_stream(&self, stream: Stream) -> Result<usize, String> {
+    pub async fn poll_stream(&mut self, stream: Stream) -> Result<usize, String> {
         let event_type = stream_filter(stream, &self.opts.packages);
         let mut added = 0;
-        let mut cursor = self.store.cursor(stream).map_err(|e| e.to_string())?;
+        let mut cursor = self.store.cursor(stream).await.map_err(|e| e.to_string())?;
         for _ in 0..self.opts.max_pages_per_poll {
             let req = ListRequest { event_type: event_type.clone(), after: cursor.clone(), limit: PAGE_SIZE };
             let res = tokio::time::timeout(self.opts.request_timeout, self.source.list_events(req)).await;
-            self.alive();
+            self.alive().await;
             let res = res.map_err(|_| {
                 format!("the full node request timed out after {} ms", self.opts.request_timeout.as_millis())
             })??;
@@ -123,9 +130,9 @@ impl<S: EventSource> Ingestor<S> {
                 (self.log)(&format!("{stream}: skipped {skipped} unrecognised event(s)"));
             }
             // A missing end cursor (nothing further) keeps the stored position.
-            added += self.store.ingest(stream, &events, res.end_cursor.as_deref()).map_err(|e| e.to_string())?;
+            added += self.store.ingest(stream, &events, res.end_cursor.as_deref()).await.map_err(|e| e.to_string())?;
             if undecodable > 0 {
-                self.store.note_undecodable(stream, undecodable).map_err(|e| e.to_string())?;
+                self.store.note_undecodable(stream, undecodable).await.map_err(|e| e.to_string())?;
             }
             if let Some(c) = res.end_cursor {
                 cursor = Some(c);
@@ -139,11 +146,11 @@ impl<S: EventSource> Ingestor<S> {
 
     /// Poll one stream, recovering from a pruned cursor, and record its health.
     pub async fn poll_one(&mut self, stream: Stream) {
-        self.alive();
+        self.alive().await;
         let outcome = match self.poll_stream(stream).await {
             Ok(n) => Ok(n),
             Err(message) => {
-                let has_cursor = matches!(self.store.cursor(stream), Ok(Some(_)));
+                let has_cursor = matches!(self.store.cursor(stream).await, Ok(Some(_)));
                 if !is_pruned(&message) || !has_cursor {
                     Err(message)
                 } else {
@@ -151,7 +158,7 @@ impl<S: EventSource> Ingestor<S> {
                     (self.log)(&format!(
                         "{stream}: cursor is below the node's retention ({message}); restarting from its earliest data"
                     ));
-                    match self.store.reset_cursor_after_gap(stream, &message, &iso(now_ms())) {
+                    match self.store.reset_cursor_after_gap(stream, &message, &iso(now_ms())).await {
                         Ok(()) => self.poll_stream(stream).await,
                         Err(e) => Err(e.to_string()),
                     }
@@ -174,7 +181,7 @@ impl<S: EventSource> Ingestor<S> {
             }
         }
         let state = state.clone();
-        if let Err(e) = self.store.record_poll(stream, &state) {
+        if let Err(e) = self.store.record_poll(stream, &state).await {
             (self.log)(&format!("{stream}: heartbeat write failed: {e}"));
         }
     }
@@ -186,7 +193,7 @@ impl<S: EventSource> Ingestor<S> {
         }
     }
 
-    /// Release the store (the database closes when it drops).
+    /// Release the store (the connection, and with it the writer lock, closes when it drops).
     pub fn into_store(self) -> Store {
         self.store
     }

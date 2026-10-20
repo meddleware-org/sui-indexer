@@ -1,6 +1,6 @@
 [package]
 name = "sui-indexer-api"
-description = "sui-indexer API: read-only SQLite, cacheable GET pages over hyper."
+description = "sui-indexer API: SELECT-only PostgreSQL role, cacheable GET pages over hyper."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -15,6 +15,10 @@ workspace = true
 name = "api"
 path = "src/main.rs"
 
+[features]
+# Only for the import-parity test (the imported index answers like the 0.0.13 SQLite one).
+import-sqlite = ["sui-indexer-store/import-sqlite", "sui-indexer-testkit/import-sqlite"]
+
 [dependencies]
 sui-indexer-store = { path = "../store" }
 # HTTP/1.1 server without a web framework: hyper + hyper-util (timeouts, graceful shutdown).
@@ -28,6 +32,7 @@ serde_json = "=1.0.154"
 base64 = "=0.23.1"
 
 [dev-dependencies]
+sui-indexer-store = { path = "../store", features = ["testing"] }
 tokio = { version = "=1.53.3", features = ["rt-multi-thread", "macros", "net", "time", "signal", "io-util", "sync"] }
 sui-indexer-testkit = { path = "../testkit" }
 tempfile = "=3.27.0"

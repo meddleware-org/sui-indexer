@@ -1,9 +1,12 @@
-//! The `events_kind` index (F25): migration of an older database, the plan of every filter shape,
-//! the page cost on a large stream, and the 300,000-row measurement (`--ignored`).
+//! The `events_kind` index (F25) on PostgreSQL: the plan of every filter shape (custom and generic
+//! plans), the merged kind seeks against the plain filter, the page cost on a large stream, and a 300,000-row
+//! measurement (`INDEX_MEASURE=1`).
 
 use super::*;
+use crate::read::{Arg, page_sql};
+use crate::require_db;
 use crate::sui::normalize_sui_address;
-use rusqlite::StatementStatus;
+use crate::writer::Store;
 
 const STREAM: Stream = Stream::AccessGate;
 
@@ -11,28 +14,28 @@ fn gate(i: u32) -> String {
     normalize_sui_address(&format!("0x{i:x}"))
 }
 
-/// Fill a stream with `n` rows: mostly `AccessMinted`, 1 in 1000 `GateCreated`, and 5 `AccessConsumed`
-/// (the rare kind), spread over 300 gates. Done in SQL: the shape matters, not the BCS.
-fn fill(conn: &Connection, n: u32) {
+/// Fill the table the way production does: `n` `access-gate` rows (mostly `AccessMinted`, 1 in 1000
+/// `GateCreated`, and 5 `AccessConsumed`: the rare kind, spread over 300 gates) interleaved in ledger order
+/// with `n / 999` `sealed-content` rows (a rare STREAM, 1 row in 1000). Done in SQL: the shape matters, not the BCS. Then
+/// ANALYZE, so the planner sees what a long-running index would have.
+async fn fill(s: &Store, n: u32) {
     let rare: Vec<String> = (1..=5).map(|k| (n * k / 6).to_string()).collect();
-    conn.execute_batch(&format!(
-        "WITH RECURSIVE s(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM s WHERE i < {n})
-         INSERT INTO events (stream, tx_digest, event_index, checkpoint, sender, event_type, bcs, kind, gate_id, commission_mist)
-         SELECT 'access-gate', 'd' || i, 0, i, 's', 't', x'00',
-                CASE WHEN i IN ({}) THEN 'AccessConsumed' WHEN i % 1000 = 7 THEN 'GateCreated' ELSE 'AccessMinted' END,
-                '0x' || printf('%064x', i % 300), 5
-         FROM s;",
+    let total = n + n / 999;
+    s.execute_batch(&format!(
+        "INSERT INTO events (stream, tx_digest, event_index, checkpoint, sender, event_type, bcs, kind, gate_id, commission_mist)
+         SELECT CASE WHEN i % 1000 = 0 THEN 'sealed-content' ELSE 'access-gate' END, 'd' || i, 0, i, 's', 't', '\\x00'::bytea,
+                CASE WHEN i % 1000 = 0 THEN 'SealedContentPublished'
+                     WHEN (i - i / 1000) IN ({}) THEN 'AccessConsumed'
+                     WHEN (i - i / 1000) % 1000 = 7 THEN 'GateCreated'
+                     ELSE 'AccessMinted' END,
+                '0x' || lpad(to_hex(i % 300), 64, '0'), 5
+         FROM generate_series(1, {total}) AS i
+         ORDER BY i;
+         ANALYZE events",
         rare.join(", ")
     ))
+    .await
     .unwrap();
-}
-
-fn has_index(conn: &Connection, name: &str) -> bool {
-    conn.query_row("SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?", [name], |r| {
-        r.get::<_, i64>(0)
-    })
-    .unwrap()
-        == 1
 }
 
 fn q(kinds: &[&str], gate_id: Option<String>, before_id: Option<i64>) -> PageQuery {
@@ -44,107 +47,171 @@ fn q(kinds: &[&str], gate_id: Option<String>, before_id: Option<i64>) -> PageQue
     }
 }
 
-/// `EXPLAIN QUERY PLAN` detail lines of the SQL a page query runs.
-fn plan(conn: &Connection, query: &PageQuery) -> String {
-    let (sql, args) = page_sql(STREAM, query);
-    let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
-    let rows: Vec<String> = stmt
-        .query_map(rusqlite::params_from_iter(args), |r| r.get::<_, String>(3))
-        .unwrap()
-        .collect::<rusqlite::Result<_>>()
-        .unwrap();
-    rows.join("\n")
-}
-
-/// The ids a page query returns and the VM steps SQLite took to produce them.
-fn run(conn: &Connection, query: &PageQuery) -> (Vec<i64>, i32) {
-    let (sql, args) = page_sql(STREAM, query);
-    let mut stmt = conn.prepare(&sql).unwrap();
-    let ids: Vec<i64> = stmt
-        .query_map(rusqlite::params_from_iter(args), |r| r.get(0))
-        .unwrap()
-        .collect::<rusqlite::Result<_>>()
-        .unwrap();
-    (ids, stmt.get_status(StatementStatus::VmStep))
-}
-
-#[test]
-fn the_ingester_adds_the_index_to_an_older_database_and_it_is_idempotent() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("indexer.db");
-    {
-        // A 0.0.12 (or TypeScript) database: the same tables, no `events_kind`.
-        let s = Store::open(&path).unwrap();
-        s.ingest(STREAM, &[crate::tests::minted_for_index("0xa", 1, "t1")], Some("c")).unwrap();
-        s.connection().execute_batch("DROP INDEX events_kind").unwrap();
-        assert!(!has_index(s.connection(), "events_kind"));
+/// The query with its arguments written in as literals (EXPLAIN ANALYZE cannot bind).
+fn inline(stream: Stream, query: &PageQuery) -> String {
+    let (mut sql, args) = page_sql(stream, query);
+    for (i, a) in args.iter().enumerate().rev() {
+        sql = sql.replace(&format!("${}", i + 1), &a.literal());
     }
-    // The API's read-only view opens it and answers without the index.
-    let r = Reader::open(&path).unwrap();
-    let all = r.page(STREAM, &q(&["AccessMinted", "AccessConsumed"], None, None)).unwrap();
-    let one = r.page(STREAM, &q(&["AccessMinted"], None, None)).unwrap();
-    assert_eq!((all.rows.len(), one.rows.len()), (1, 1));
-    assert!(r.try_write().is_err());
-    drop(r);
-    // The ingester's start creates it, once.
-    let s = Store::open(&path).unwrap();
-    assert!(has_index(s.connection(), "events_kind"));
-    let ddl = |s: &Store| -> String {
-        s.connection().query_row("SELECT sql FROM sqlite_master WHERE name = 'events_kind'", [], |r| r.get(0)).unwrap()
+    sql
+}
+
+async fn text_rows(s: &Store, sql: &str) -> String {
+    let msgs = s.client().simple_query(sql).await.unwrap();
+    msgs.iter()
+        .filter_map(|m| match m {
+            tokio_postgres::SimpleQueryMessage::Row(r) => r.get(0).map(str::to_owned),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The plan with the arguments known (what the first executions of a prepared statement get).
+async fn custom_plan(s: &Store, stream: Stream, query: &PageQuery) -> String {
+    text_rows(s, &format!("EXPLAIN (COSTS OFF) {}", inline(stream, query))).await
+}
+
+/// The generic plan (parameters unknown): what a prepared statement settles on after a few executions
+/// (`plan_cache_mode = auto`), the case where a value-specific plan can no longer save a bad shape.
+async fn generic_plan(s: &Store, stream: Stream, query: &PageQuery) -> String {
+    let (sql, _) = page_sql(stream, query);
+    text_rows(s, &format!("EXPLAIN (COSTS OFF, GENERIC_PLAN) {sql}")).await
+}
+
+/// Buffers touched (hit + read, of the root node: the whole query) and rows removed by filters, from
+/// `EXPLAIN (ANALYZE, BUFFERS)`.
+async fn cost(s: &Store, query: &PageQuery) -> (i64, i64, String) {
+    let plan =
+        text_rows(s, &format!("EXPLAIN (ANALYZE, BUFFERS, COSTS OFF, TIMING OFF) {}", inline(STREAM, query))).await;
+    let numbers = |line: &str, keys: &[&str]| -> i64 {
+        line.split_whitespace()
+            .filter_map(|w| keys.iter().find_map(|k| w.strip_prefix(k)).and_then(|n| n.parse::<i64>().ok()))
+            .sum()
     };
-    assert_eq!(ddl(&s), "CREATE INDEX events_kind ON events (stream, kind, id)");
-    drop(s);
-    let again = Store::open(&path).unwrap();
-    assert!(has_index(again.connection(), "events_kind"));
-    assert_eq!(again.coverage(STREAM).unwrap().events, 1);
-    // A fresh database has it from the start, and the reader never creates it.
-    let fresh = Store::open(dir.path().join("fresh.db")).unwrap();
-    assert!(has_index(fresh.connection(), "events_kind"));
-    let r = Reader::open(&path).unwrap();
-    assert!(r.try_write().is_err());
+    let buffers = plan.lines().find(|l| l.contains("Buffers:")).map_or(0, |l| numbers(l, &["hit=", "read="]));
+    let removed = plan
+        .lines()
+        .filter_map(|l| l.split("Rows Removed by Filter:").nth(1))
+        .filter_map(|n| n.trim().parse::<i64>().ok())
+        .sum();
+    (buffers, removed, plan)
 }
 
-#[test]
-fn every_filter_shape_uses_the_intended_index() {
-    let s = Store::open(":memory:").unwrap();
-    let c = s.connection();
-    fill(c, 3000);
+async fn run_ids(s: &Store, query: &PageQuery) -> Vec<i64> {
+    let (sql, args) = page_sql(STREAM, query);
+    let params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = args.iter().map(Arg::as_sql).collect();
+    s.query(&sql, &params).await.unwrap().iter().map(|r| r.get(0)).collect()
+}
+
+#[tokio::test]
+async fn the_api_answers_without_events_kind_and_the_index_is_in_the_first_migration() {
+    let db = require_db!();
+    let mut s = db.store().await;
+    s.ingest(STREAM, &[crate::tests::minted("0xa", 1, 1, "t1")], Some("c")).await.unwrap();
+    let has = |name: &'static str| {
+        let s = &s;
+        async move {
+            !s.query("SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND indexname = $1", &[&name])
+                .await
+                .unwrap()
+                .is_empty()
+        }
+    };
+    for index in ["events_stream", "events_gate", "events_kind"] {
+        assert!(has(index).await, "{index} is created by migration 1");
+    }
+    let ddl: String =
+        s.query("SELECT indexdef FROM pg_indexes WHERE indexname = 'events_kind'", &[]).await.unwrap()[0].get(0);
+    assert_eq!(ddl, "CREATE INDEX events_kind ON public.events USING btree (stream, kind, id)");
+    // The index serves only speed: the read-only API (which cannot create one) answers without it.
+    db.admin().await.batch_execute("DROP INDEX events_kind").await.unwrap();
+    let r = db.reader(1);
+    let session = r.session().await.unwrap();
+    let all = session.page(STREAM, &q(&["AccessMinted", "AccessConsumed"], None, None)).await.unwrap();
+    let one = session.page(STREAM, &q(&["AccessMinted"], None, None)).await.unwrap();
+    assert_eq!((all.rows.len(), one.rows.len()), (1, 1));
+    assert!(session.try_write().await.is_err());
+    session.end().await;
+}
+
+#[tokio::test]
+async fn every_filter_shape_uses_the_intended_index() {
+    let db = require_db!();
+    let s = db.store().await;
+    fill(&s, 30_000).await;
     let g = Some(gate(7));
-    // No filter, or only a cursor: the stream index.
-    for query in [q(&[], None, None), q(&[], None, Some(100))] {
-        let p = plan(c, &query);
-        assert!(p.contains("events_stream") && !p.contains("events_kind") && !p.contains("events_gate"), "{p}");
+    let shapes: Vec<(&str, PageQuery)> = vec![
+        ("stream", q(&[], None, None)),
+        ("stream before", q(&[], None, Some(100))),
+        ("one kind", q(&["AccessConsumed"], None, None)),
+        ("one kind before", q(&["AccessConsumed"], None, Some(100))),
+        ("two kinds", q(&["AccessConsumed", "GateCreated"], None, None)),
+        ("two kinds before", q(&["AccessMinted", "AccessConsumed"], None, Some(100))),
+        ("gate", q(&[], g.clone(), None)),
+        ("gate before", q(&[], g.clone(), Some(100))),
+        ("gate and a kind", q(&["AccessConsumed"], g.clone(), None)),
+        ("gate and two kinds before", q(&["AccessMinted", "AccessConsumed"], g.clone(), Some(100))),
+    ];
+    for (name, query) in &shapes {
+        {
+            let (mode, p) = ("custom", custom_plan(&s, STREAM, query).await);
+            // Whatever the shape: an index, never a walk of the table, and no sort of the table.
+            assert!(!p.contains("Seq Scan") && !p.contains("Bitmap Heap Scan"), "{name}/{mode}:\n{p}");
+            match *name {
+                "stream" | "stream before" => {
+                    // The stream that makes up most of the table may be read by the primary key (every
+                    // row matches, so the first 21 do); never by a kind or gate index, never sorted.
+                    assert!(
+                        !p.contains("events_kind") && !p.contains("events_gate") && !p.contains("Sort"),
+                        "{name}/{mode}:\n{p}"
+                    );
+                    assert!(p.contains("events_stream") || p.contains("events_pkey"), "{name}/{mode}:\n{p}");
+                }
+                "one kind" | "one kind before" => {
+                    assert!(p.contains("Index Scan Backward using events_kind"), "{name}/{mode}:\n{p}");
+                    assert!(!p.contains("Sort"), "{name}/{mode}:\n{p}");
+                }
+                "two kinds" | "two kinds before" => {
+                    // One bounded seek per kind, merged: a top-N over the arms' rows only.
+                    assert!(
+                        p.contains("Append") && !p.contains("events_stream") && !p.contains("events_gate"),
+                        "{name}/{mode}:\n{p}"
+                    );
+                    let arms_on_kind = p.matches("Index Scan Backward using events_kind").count();
+                    if *name == "two kinds" {
+                        assert_eq!(arms_on_kind, 2, "{name}/{mode}:\n{p}");
+                    } else {
+                        // With an upper bound as small as 100 the planner may read a common kind's arm off
+                        // the primary key (a range of 100 ids): still bounded, which is the point.
+                        let pk_arms = p.matches("Index Scan Backward using events_pkey").count();
+                        assert_eq!(arms_on_kind + pk_arms, 2, "{name}/{mode}:\n{p}");
+                        assert!(pk_arms == 0 || p.contains("Index Cond: (id < 100)"), "{name}/{mode}:\n{p}");
+                    }
+                }
+                _ => {
+                    // A gate, alone or with kinds: the gate index; kinds only filter its rows.
+                    assert!(p.contains("events_gate") && !p.contains("events_kind"), "{name}/{mode}:\n{p}");
+                    assert!(!p.contains("Sort"), "{name}/{mode}:\n{p}");
+                }
+            }
+        }
     }
-    // One kind: the kind index, with or without a cursor, and no sort.
-    for query in [q(&["AccessConsumed"], None, None), q(&["AccessConsumed"], None, Some(100))] {
-        let p = plan(c, &query);
-        assert!(p.contains("events_kind (stream=? AND kind=?") && !p.contains("TEMP B-TREE"), "{p}");
-    }
-    // Several kinds: one seek on the kind index per kind, merged; never a walk of the stream.
-    for query in
-        [q(&["AccessConsumed", "GateCreated"], None, None), q(&["AccessMinted", "AccessConsumed"], None, Some(100))]
-    {
-        let p = plan(c, &query);
-        assert!(p.contains("MERGE (UNION ALL)"), "{p}");
-        assert_eq!(p.matches("events_kind (stream=? AND kind=?").count(), 2, "{p}");
-        assert!(!p.contains("events_stream") && !p.contains("events_gate") && !p.contains("SCAN events"), "{p}");
-    }
-    // A gate, alone or with kinds: the gate index (bounded by the gate's rows), kinds only filter.
-    for query in [
-        q(&[], g.clone(), None),
-        q(&["AccessConsumed"], g.clone(), None),
-        q(&["AccessMinted", "AccessConsumed"], g.clone(), Some(100)),
-    ] {
-        let p = plan(c, &query);
-        assert!(p.contains("events_gate (stream=? AND gate_id=?") && !p.contains("events_kind"), "{p}");
-    }
+    // A rare STREAM (1 row in 1000) is read through (stream, id): walking the primary key backward would
+    // filter past thousands of other rows. The planner knows from the statistics, with the values given
+    // (the API's pooled connections force custom plans for exactly this reason).
+    let sealed = PageQuery { limit: 20, ..Default::default() };
+    let p = custom_plan(&s, Stream::SealedContent, &sealed).await;
+    assert!(p.contains("events_stream") && !p.contains("events_pkey") && !p.contains("Seq Scan"), "{p}");
+    let p = custom_plan(&s, Stream::SealedContent, &PageQuery { before_id: Some(500), ..sealed.clone() }).await;
+    assert!(p.contains("events_stream") && !p.contains("events_pkey"), "{p}");
 }
 
-#[test]
-fn merged_kind_seeks_return_what_the_filter_returns() {
-    let s = Store::open(":memory:").unwrap();
-    let c = s.connection();
-    fill(c, 4000);
+#[tokio::test]
+async fn merged_kind_seeks_return_what_the_filter_returns() {
+    let db = require_db!();
+    let s = db.store().await;
+    fill(&s, 4_000).await;
     let every = ["AccessMinted", "AccessConsumed", "GateCreated"];
     let mut seed = 0x2545_f491_4f6c_dd1du64;
     let mut next = move |m: u64| {
@@ -175,100 +242,120 @@ fn merged_kind_seeks_return_what_the_filter_returns() {
             want.push_str(&format!(" AND id < {b}"));
         }
         want.push_str(&format!(" ORDER BY id DESC LIMIT {}", limit + 1));
-        let want: Vec<i64> =
-            c.prepare(&want).unwrap().query_map([], |r| r.get(0)).unwrap().collect::<rusqlite::Result<_>>().unwrap();
-        let (got, _) = run(c, &query);
+        let want: Vec<i64> = s.query(&want, &[]).await.unwrap().iter().map(|r| r.get(0)).collect();
+        let got = run_ids(&s, &query).await;
         assert_eq!(got, want, "kinds {kinds:?} gate {gate_id:?} before {before:?} limit {limit}");
-        let page = s.page(STREAM, &query).unwrap();
+        let page = s.page(STREAM, &query).await.unwrap();
         assert_eq!(page.rows.len(), want.len().min(limit as usize));
         assert_eq!(page.next.is_some(), want.len() > limit as usize);
     }
 }
 
-/// F25: a rare kind costs its own rows, not the stream's.
-#[test]
-fn a_rare_kind_page_over_300k_rows_costs_a_handful_of_steps() {
-    let s = Store::open(":memory:").unwrap();
-    let c = s.connection();
-    fill(c, 300_000);
-    for kinds in [&["AccessConsumed"][..], &["AccessConsumed", "GateCreated"][..]] {
-        let (ids, steps) = run(c, &q(kinds, None, None));
-        assert!(!ids.is_empty());
-        assert!(steps < 5_000, "{kinds:?} took {steps} VM steps");
-        // A cursor into the older half is as cheap.
-        let (_, steps) = run(c, &q(kinds, None, Some(150_000)));
-        assert!(steps < 5_000, "{kinds:?} before 150000 took {steps} VM steps");
+/// A generic plan (parameters unknown) of the one-kind query walks the primary key backward and filters:
+/// right for a common kind, a walk of the whole table for a rare one. PostgreSQL switches a prepared
+/// statement to a generic plan after five executions when its estimate looks no worse, so the API's pooled
+/// connections force custom plans (the values known, the statistics used).
+#[tokio::test]
+async fn pooled_statements_never_switch_to_a_generic_plan() {
+    let db = require_db!();
+    let s = db.store().await;
+    fill(&s, 20_000).await;
+    let r = db.reader(1);
+    for query in [
+        q(&["AccessConsumed"], None, None),
+        q(&["AccessConsumed", "GateCreated"], None, None),
+        q(&[], Some(gate(7)), None),
+    ] {
+        for _ in 0..12 {
+            let session = r.session().await.unwrap();
+            assert!(!session.page(STREAM, &query).await.unwrap().rows.is_empty());
+            session.end().await;
+        }
     }
-    // Without the index the same single-kind page walks the stream: the test sees the difference.
-    c.execute_batch("DROP INDEX events_kind").unwrap();
-    let (_, steps) = run(c, &q(&["AccessConsumed"], None, None));
-    assert!(steps > 100_000, "without events_kind the page took only {steps} VM steps");
+    let session = r.session().await.unwrap();
+    assert_eq!(session.query_for_test("SHOW plan_cache_mode").await, "force_custom_plan");
+    // Twelve executions of each statement on one pooled connection (past the five after which `auto`
+    // would consider a generic plan), none of them generic.
+    assert_eq!(
+        session.query_for_test("SELECT coalesce(sum(generic_plans), 0)::text FROM pg_prepared_statements").await,
+        "0"
+    );
+    assert!(
+        session
+            .query_for_test("SELECT sum(custom_plans)::text FROM pg_prepared_statements")
+            .await
+            .parse::<i64>()
+            .unwrap()
+            >= 36
+    );
+    session.end().await;
+    // The hazard being avoided, for the record: the generic plan of the one-kind query.
+    let generic = generic_plan(&s, STREAM, &q(&["AccessConsumed"], None, None)).await;
+    assert!(generic.contains("events_pkey") || generic.contains("events_kind"), "{generic}");
 }
 
-/// Recorded in the audit (F25). Run: `cargo test -p sui-indexer-store --release -- --ignored --nocapture f25`.
-#[test]
-#[ignore = "measurement, not a gate"]
-fn f25_measurement_on_300k_rows() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("indexer.db");
-    let s = Store::open(&path).unwrap();
-    fill(s.connection(), 300_000);
-    s.connection().execute_batch("DROP INDEX events_kind").unwrap();
-    drop(s);
+/// F25: a rare kind costs its own rows, not the stream's.
+#[tokio::test]
+async fn a_rare_kind_page_over_300k_rows_touches_a_handful_of_buffers() {
+    let db = require_db!();
+    let s = db.store().await;
+    fill(&s, 300_000).await;
+    for kinds in [&["AccessConsumed"][..], &["AccessConsumed", "GateCreated"][..]] {
+        for before in [None, Some(150_000)] {
+            let (buffers, removed, plan) = cost(&s, &q(kinds, None, before)).await;
+            assert!(
+                removed == 0 && buffers < 200,
+                "{kinds:?} before {before:?}: {buffers} buffers, {removed} rows filtered:\n{plan}"
+            );
+            assert!(!run_ids(&s, &q(kinds, None, before)).await.is_empty());
+        }
+    }
+    // The head page and a gate page are as cheap.
+    for query in [q(&[], None, None), q(&[], Some(gate(7)), None)] {
+        let (buffers, _, plan) = cost(&s, &query).await;
+        assert!(buffers < 200, "{buffers} buffers:\n{plan}");
+    }
+    // So is the head page of the RARE stream: one id range, not a walk past the other stream's rows.
+    let rare = PageQuery { limit: 20, ..Default::default() };
+    let plan = text_rows(
+        &s,
+        &format!("EXPLAIN (ANALYZE, BUFFERS, COSTS OFF, TIMING OFF) {}", inline(Stream::SealedContent, &rare)),
+    )
+    .await;
+    assert!(plan.contains("events_stream") && !plan.contains("Rows Removed by Filter"), "{plan}");
+    // Without the index the same single-kind page walks the stream: the test sees the difference.
+    s.execute_batch("DROP INDEX events_kind").await.unwrap();
+    let (buffers, _, plan) = cost(&s, &q(&["AccessConsumed"], None, None)).await;
+    assert!(
+        buffers > 2_000 || plan.contains("Rows Removed by Filter"),
+        "without events_kind the page took only {buffers} buffers:\n{plan}"
+    );
+}
 
-    // The pre-0.0.13 query on the pre-0.0.13 database.
-    let old = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
-    let rate = |f: &dyn Fn() -> usize| -> f64 {
+/// Recorded in the audit (F25). Run: `INDEX_MEASURE=1 cargo test -p sui-indexer-store --release -- --nocapture measurement`.
+#[tokio::test]
+async fn measurement_on_300k_rows() {
+    if std::env::var("INDEX_MEASURE").ok().as_deref() != Some("1") {
+        return;
+    }
+    let db = require_db!();
+    let s = db.store().await;
+    fill(&s, 300_000).await;
+    let r = db.reader(8);
+    for (label, query) in [
+        ("head page", q(&[], None, None)),
+        ("one rare kind", q(&["AccessConsumed"], None, None)),
+        ("two kinds, one rare", q(&["AccessConsumed", "GateCreated"], None, None)),
+        ("gate", q(&[], Some(gate(7)), None)),
+    ] {
         let t = std::time::Instant::now();
-        let mut n = 0;
+        let mut n = 0u32;
         while t.elapsed().as_millis() < 2000 {
-            assert!(f() > 0);
+            let session = r.session().await.unwrap();
+            assert!(!session.page(STREAM, &query).await.unwrap().rows.is_empty());
+            session.end().await;
             n += 1;
         }
-        f64::from(n) / t.elapsed().as_secs_f64()
-    };
-    let old_sql = "SELECT id, event_type, sender, bcs, checkpoint, tx_digest, event_index FROM events WHERE stream = ? AND kind IN (?) ORDER BY id DESC LIMIT 21";
-    let before = rate(&|| {
-        old.prepare_cached(old_sql)
-            .unwrap()
-            .query_map(["access-gate", "AccessConsumed"], |r| r.get::<_, i64>(0))
-            .unwrap()
-            .count()
-    });
-    drop(old);
-
-    // The ingester starts: how long it takes to build the index, and what readers see meanwhile.
-    let reader = Reader::open(&path).unwrap();
-    let writer = std::thread::spawn({
-        let path = path.clone();
-        move || {
-            let t = std::time::Instant::now();
-            let s = Store::open(&path).unwrap();
-            (t.elapsed(), s)
-        }
-    });
-    let mut worst = std::time::Duration::ZERO;
-    let mut reads = 0;
-    while !writer.is_finished() {
-        let t = std::time::Instant::now();
-        let p = reader.page(STREAM, &PageQuery { kinds: None, gate_id: None, before_id: None, limit: 20 }).unwrap();
-        worst = worst.max(t.elapsed());
-        assert_eq!(p.rows.len(), 20);
-        reads += 1;
+        println!("{label}: {:.0} pages/s (one connection, sequential)", f64::from(n) / t.elapsed().as_secs_f64());
     }
-    let (built, s) = writer.join().unwrap();
-    println!("index build in Store::open: {built:?}; {reads} head pages read meanwhile, slowest {worst:?}");
-    assert!(has_index(s.connection(), "events_kind"));
-
-    for (label, kinds) in
-        [("one rare kind", &["AccessConsumed"][..]), ("two kinds, one rare", &["AccessConsumed", "GateCreated"][..])]
-    {
-        let query = q(kinds, None, None);
-        let after = rate(&|| reader.page(STREAM, &query).unwrap().rows.len());
-        println!("{label}: after {after:.0} pages/s");
-    }
-    println!("one rare kind, 0.0.12 query and database: {before:.0} pages/s");
-    let query = q(&["AccessConsumed"], None, None);
-    let after = rate(&|| reader.page(STREAM, &query).unwrap().rows.len());
-    println!("one rare kind: before {before:.0} pages/s, after {after:.0} pages/s ({:.0}x)", after / before);
 }

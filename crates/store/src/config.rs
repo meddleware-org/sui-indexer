@@ -1,13 +1,16 @@
 //! Configuration from the environment: the variables, defaults and validation of the TypeScript
 //! `src/config.ts` (0.0.11). Each process reads the variables it uses:
 //!
-//! - the ingester: `NETWORK`, `GRPC_URL`, `DB_PATH`, `POLL_MS`, `ACCESS_GATE_ORIGINAL_ID`,
+//! - the ingester: `NETWORK`, `GRPC_URL`, `DATABASE_URL`, `POLL_MS`, `ACCESS_GATE_ORIGINAL_ID`,
 //!   `SEAL_ORIGINAL_ID`, `REINDEX_CONFIRM`;
-//! - the API: `NETWORK`, `DB_PATH`, `PORT`, `POLL_MS`, `RATE_LIMIT_PER_SEC`, `RATE_LIMIT_BURST`.
+//! - the API: `NETWORK`, `DATABASE_URL`, `DB_POOL_SIZE`, `PORT`, `POLL_MS`, `RATE_LIMIT_PER_SEC`,
+//!   `RATE_LIMIT_BURST`;
+//! - both: `ALLOW_INSECURE_DATABASE=1` (local tests: admits `sslmode=disable` and an empty password).
 //!
-//! Errors carry the messages of `config.ts`.
+//! Errors carry the messages of `config.ts`; none of them contains the database URL.
 
 use crate::Stream;
+use crate::db::DatabaseSettings;
 use crate::sui::{is_hex_id, normalize_sui_address};
 
 /// One network's recorded package deployments (the original ids events are typed at).
@@ -37,7 +40,8 @@ pub struct IngestConfig {
     /// The one network this instance indexes.
     pub network: String,
     pub grpc_url: String,
-    pub db_path: String,
+    /// The owner role's connection (DDL and writes). The ingester uses exactly one connection.
+    pub database: DatabaseSettings,
     pub poll_ms: u64,
     pub access_gate_original_id: String,
     pub seal_original_id: String,
@@ -50,7 +54,10 @@ pub struct IngestConfig {
 pub struct ApiConfig {
     /// The one network this instance serves (the first path segment of the API).
     pub network: String,
-    pub db_path: String,
+    /// The SELECT-only role's connection.
+    pub database: DatabaseSettings,
+    /// Connections in the API's pool.
+    pub pool_size: usize,
     pub port: u16,
     /// The ingester's poll interval: `/healthz` calls a stream stale after five of them.
     pub poll_ms: u64,
@@ -83,8 +90,21 @@ fn network(env: &dyn Fn(&str) -> Option<String>) -> String {
     var(env, "NETWORK").unwrap_or_else(|| "testnet".into())
 }
 
-fn db_path(env: &dyn Fn(&str) -> Option<String>) -> String {
-    var(env, "DB_PATH").unwrap_or_else(|| "/data/indexer.db".into())
+/// `DATABASE_URL` (required) validated by [`DatabaseSettings::parse`]; `ALLOW_INSECURE_DATABASE=1` admits
+/// a plaintext, passwordless local database. The URL is never echoed in an error.
+pub fn database(env: &dyn Fn(&str) -> Option<String>) -> Result<DatabaseSettings> {
+    let url = var(env, "DATABASE_URL").ok_or_else(|| {
+        ConfigError(
+            "DATABASE_URL is required (postgres://user:password@host:5432/database?sslmode=verify-full&sslrootcert=/path/ca.crt)"
+                .into(),
+        )
+    })?;
+    let insecure = match var(env, "ALLOW_INSECURE_DATABASE").as_deref() {
+        None | Some("0") => false,
+        Some("1") => true,
+        Some(_) => return Err(ConfigError("ALLOW_INSECURE_DATABASE must be 1 (or unset)".into())),
+    };
+    DatabaseSettings::parse(&url, insecure)
 }
 
 /// JavaScript `Number(raw)` for the strings an operator plausibly writes: surrounding whitespace,
@@ -182,7 +202,7 @@ impl IngestConfig {
     pub fn load(env: &dyn Fn(&str) -> Option<String>) -> Result<IngestConfig> {
         let network = network(env);
         let grpc_url = grpc_url(env, &network)?;
-        let db_path = db_path(env);
+        let database = database(env)?;
         let poll_ms = int(env, "POLL_MS", 15_000, 1_000, 3_600_000)?;
         let access_gate_original_id = package_id(env, "ACCESS_GATE_ORIGINAL_ID", || {
             deployment(&network)
@@ -198,7 +218,7 @@ impl IngestConfig {
         Ok(IngestConfig {
             network,
             grpc_url,
-            db_path,
+            database,
             poll_ms,
             access_gate_original_id,
             seal_original_id,
@@ -217,7 +237,8 @@ impl ApiConfig {
     pub fn load(env: &dyn Fn(&str) -> Option<String>) -> Result<ApiConfig> {
         Ok(ApiConfig {
             network: network(env),
-            db_path: db_path(env),
+            database: database(env)?,
+            pool_size: int(env, "DB_POOL_SIZE", 8, 1, 64)? as usize,
             port: int(env, "PORT", 8080, 1, 65_535)? as u16,
             poll_ms: int(env, "POLL_MS", 15_000, 1_000, 3_600_000)?,
             rate_limit_per_sec: int(env, "RATE_LIMIT_PER_SEC", 10, 1, 10_000)? as u32,
@@ -231,9 +252,13 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
+    const URL: &str = "postgres://sui_indexer_api:a-long-throwaway-password@db.example:5432/sui_indexer?sslmode=verify-full&sslrootcert=/etc/postgres-ca/ca.crt";
+
+    /// The environment of `pairs` plus a valid `DATABASE_URL` (unless the test sets its own).
     fn env(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> + use<> {
-        let m: HashMap<String, String> = pairs.iter().map(|(k, v)| ((*k).into(), (*v).into())).collect();
-        move |k| m.get(k).cloned()
+        let mut m: HashMap<String, String> = pairs.iter().map(|(k, v)| ((*k).into(), (*v).into())).collect();
+        m.entry("DATABASE_URL".into()).or_insert_with(|| URL.into());
+        move |k| m.get(k).filter(|v| v.as_str() != "<unset>").cloned()
     }
 
     fn ingest(pairs: &[(&str, &str)]) -> Result<IngestConfig> {
@@ -253,18 +278,50 @@ mod tests {
         let c = ingest(&[]).unwrap();
         assert_eq!(c.network, "testnet");
         assert_eq!(c.poll_ms, 15_000);
-        assert_eq!(c.db_path, "/data/indexer.db");
+        assert_eq!(
+            (c.database.host(), c.database.dbname(), c.database.user()),
+            ("db.example", "sui_indexer", "sui_indexer_api")
+        );
         assert_eq!(c.grpc_url, "https://fullnode.testnet.sui.io:443");
         assert_eq!(c.access_gate_original_id, DEPLOYMENTS[0].access_gate_original_id);
         assert!(is_hex_id(&c.seal_original_id) && c.seal_original_id.len() == 66);
         let a = api(&[]).unwrap();
-        assert_eq!(
-            (a.network.as_str(), a.port, a.poll_ms, a.db_path.as_str()),
-            ("testnet", 8080, 15_000, "/data/indexer.db")
-        );
+        assert_eq!((a.network.as_str(), a.port, a.poll_ms, a.pool_size), ("testnet", 8080, 15_000, 8));
         assert_eq!((a.rate_limit_per_sec, a.rate_limit_burst), (10, 40));
         // Empty means unset, as `env.X || default` did.
         assert_eq!(api(&[("PORT", ""), ("NETWORK", "")]).unwrap().port, 8080);
+    }
+
+    #[test]
+    fn the_database_url_is_required_and_validated_without_echoing_it() {
+        let pw = "a-long-throwaway-password";
+        assert!(err(ingest(&[("DATABASE_URL", "<unset>")])).contains("DATABASE_URL is required"));
+        assert!(err(api(&[("DATABASE_URL", "")])).contains("DATABASE_URL is required"));
+        for bad in [
+            format!("postgres://u:{pw}@h/db"),
+            format!("postgres://u:{pw}@h/db?sslmode=require&sslrootcert=/c"),
+            format!("mysql://u:{pw}@h/db"),
+        ] {
+            let e = err(api(&[("DATABASE_URL", &bad)]));
+            assert!(e.contains("DATABASE_URL") && !e.contains(pw), "{e}");
+        }
+        // The insecure switch is explicit and only for 1.
+        let plain = "postgres://u:pw@127.0.0.1:5432/db?sslmode=disable";
+        assert!(api(&[("DATABASE_URL", plain)]).is_err());
+        assert!(api(&[("DATABASE_URL", plain), ("ALLOW_INSECURE_DATABASE", "1")]).is_ok());
+        assert!(
+            err(api(&[("DATABASE_URL", plain), ("ALLOW_INSECURE_DATABASE", "yes")]))
+                .contains("ALLOW_INSECURE_DATABASE")
+        );
+        assert!(!format!("{:?}", api(&[]).unwrap()).contains(pw));
+    }
+
+    #[test]
+    fn the_pool_size_is_bounded() {
+        assert_eq!(api(&[("DB_POOL_SIZE", "3")]).unwrap().pool_size, 3);
+        for bad in ["0", "65", "x"] {
+            assert!(err(api(&[("DB_POOL_SIZE", bad)])).contains("DB_POOL_SIZE"), "{bad}");
+        }
     }
 
     #[test]

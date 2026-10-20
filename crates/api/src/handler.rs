@@ -1,15 +1,15 @@
 //! Request → response: routing, validation, cache headers and the rate limit, as the TypeScript
-//! `src/api.ts` (0.0.11) did, over a read-only database. Pure with respect to the transport, so it
+//! `src/api.ts` (0.0.11) did, over the read-only PostgreSQL role. Pure with respect to the transport, so it
 //! is tested without a socket.
 
-use std::path::PathBuf;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicI64, Ordering};
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as B64;
 use serde::Serialize;
 use sui_indexer_store::sui::{is_hex_id, normalize_sui_address};
-use sui_indexer_store::{EventRow, OpenError, PageQuery, Reader, Stream};
+use sui_indexer_store::{EventRow, PageQuery, ReadError, Reader, Session, StoreError, Stream};
 
 use crate::query::{Params, canonical_path, canonical_query, distinct_items, is_limit_syntax, normalize_path};
 use crate::ratelimit::{RateLimiter, client_key};
@@ -31,8 +31,10 @@ pub const IMMUTABLE: &str = "public, max-age=31536000, immutable";
 /// The newest page changes as events land: short browser TTL, slightly longer at the edge.
 pub const HEAD: &str = "public, max-age=10, s-maxage=30";
 
-/// What a client sees while the ingester has not created the database yet.
+/// What a client sees while the ingester has not created the schema yet.
 pub const NOT_READY: &str = "index not created yet";
+/// What a client sees while the database cannot be reached (the cause is logged, not sent).
+pub const UNAVAILABLE: &str = "database unavailable";
 
 pub struct ApiRequest<'a> {
     pub method: &'a str,
@@ -61,52 +63,49 @@ impl ApiResponse {
     }
 }
 
-/// The read-only database, opened on demand: until the ingester creates it the API answers `503`
-/// (and `/readyz` keeps the pod out of the Service), then connections are pooled.
+/// The read-only database: a pool over the SELECT-only role. Until the ingester has migrated and started
+/// the API answers `503` (and `/readyz` keeps the pod out of the Service), and the same while the database
+/// is unreachable; nothing here ever writes or migrates.
 pub struct Db {
-    path: PathBuf,
-    idle: Mutex<Vec<Reader>>,
-}
-
-/// Idle read-only connections kept per process.
-const MAX_IDLE: usize = 32;
-
-pub enum DbError {
-    NotReady,
-    Sql(String),
+    reader: Reader,
+    /// Epoch ms of the last "database unavailable" log line (one per 10 s, not one per request).
+    last_logged: AtomicI64,
 }
 
 impl Db {
-    pub fn new(path: impl Into<PathBuf>) -> Db {
-        Db { path: path.into(), idle: Mutex::new(Vec::new()) }
+    pub fn new(reader: Reader) -> Db {
+        Db { reader, last_logged: AtomicI64::new(0) }
     }
 
-    /// Run `f` on a pooled connection inside one read transaction (one snapshot for the request).
-    pub fn with<T>(&self, f: impl FnOnce(&Reader) -> Result<T, HttpError>) -> Result<T, HttpError> {
-        let pooled = self.idle.lock().unwrap_or_else(|e| e.into_inner()).pop();
-        let reader = match pooled {
-            Some(r) => r,
-            None => match Reader::open(&self.path) {
-                Ok(r) => r,
-                Err(OpenError::NotReady(_)) => return Err(HttpError::new(503, NOT_READY)),
-                Err(OpenError::Sql(e)) => return Err(HttpError::internal(e.to_string())),
-            },
-        };
-        reader.begin().map_err(|e| HttpError::internal(e.to_string()))?;
-        let out = f(&reader);
-        let ended = reader.end();
-        if ended.is_ok() {
-            let mut idle = self.idle.lock().unwrap_or_else(|e| e.into_inner());
-            if idle.len() < MAX_IDLE {
-                idle.push(reader);
+    /// Begin a read-only snapshot for one request. End it with [`Session::end`].
+    pub async fn begin(&self) -> Result<Session, HttpError> {
+        self.reader.session().await.map_err(|e| self.http(e))
+    }
+
+    /// Whether the schema is there and the database answers (`/readyz`): always asks the database.
+    pub async fn check(&self) -> Result<(), HttpError> {
+        self.reader.check().await.map_err(|e| self.http(e))
+    }
+
+    pub fn reader(&self) -> &Reader {
+        &self.reader
+    }
+
+    fn http(&self, e: ReadError) -> HttpError {
+        match e {
+            ReadError::NotReady(_) => HttpError::new(503, NOT_READY),
+            ReadError::Unavailable(detail) => {
+                let now = sui_indexer_store::time::now_ms();
+                let last = self.last_logged.load(Ordering::Relaxed);
+                if now - last > 10_000
+                    && self.last_logged.compare_exchange(last, now, Ordering::Relaxed, Ordering::Relaxed).is_ok()
+                {
+                    crate::log(&format!("database unavailable: {detail}"));
+                }
+                HttpError::new(503, UNAVAILABLE)
             }
+            ReadError::Store(e) => HttpError::internal(e.to_string()),
         }
-        out
-    }
-
-    /// Whether the database opens and has its schema (`/readyz`).
-    pub fn ready(&self) -> bool {
-        self.with(|r| r.generation().map_err(sql).map(|g| g.is_some())).unwrap_or(false)
     }
 }
 
@@ -134,7 +133,7 @@ impl HttpError {
     }
 }
 
-fn sql(e: sui_indexer_store::SqlError) -> HttpError {
+fn sql(e: StoreError) -> HttpError {
     HttpError::internal(e.to_string())
 }
 
@@ -253,17 +252,17 @@ fn etag_matches(header: Option<&str>, etag: &str) -> bool {
     })
 }
 
-fn events_page(
-    req: &ApiRequest,
+async fn events_page(
+    req: &ApiRequest<'_>,
     stream: Stream,
     q: PageQuery,
-    r: &Reader,
+    r: &Session,
     generation: &str,
 ) -> Result<ApiResponse, HttpError> {
     let head = q.before_id.is_none();
     let cache_control = if head { HEAD } else { IMMUTABLE };
     let etag = match q.before_id {
-        None => format!("\"{generation}-{}\"", r.head_id(stream).map_err(sql)?),
+        None => format!("\"{generation}-{}\"", r.head_id(stream).await.map_err(sql)?),
         Some(b) => format!("\"{generation}-b{b}\""),
     };
     if etag_matches(req.if_none_match, &etag) {
@@ -272,14 +271,12 @@ fn events_page(
         headers.push(("ETag", etag));
         return Ok(ApiResponse { status: 304, headers, body: String::new() });
     }
-    let page = r.page(stream, &q).map_err(sql)?;
-    let coverage = r.coverage(stream).map_err(sql)?;
-    let polled = if head {
-        let at = r.poll_state(stream).map_err(sql)?.last_success_at;
-        Some(if at == 0 { None } else { Some(at) })
-    } else {
-        None
-    };
+    // The three reads are independent: one round trip on the session's connection.
+    let (page, coverage, poll) = tokio::try_join!(r.page(stream, &q), r.coverage(stream), async {
+        if head { r.poll_state(stream).await.map(Some) } else { Ok(None) }
+    })
+    .map_err(sql)?;
+    let polled = poll.map(|p| if p.last_success_at == 0 { None } else { Some(p.last_success_at) });
     let body = EventsPage {
         events: page.rows.iter().map(serialize_row).collect(),
         cursor: page.next.map(|n| format!("{generation}.{n}")),
@@ -349,21 +346,36 @@ struct ReadyBody<'a> {
     error: Option<&'a str>,
 }
 
-fn healthz(ctx: &ApiContext) -> ApiResponse {
+async fn stream_coverage(r: &Session, s: Stream) -> Result<StreamCoverage, HttpError> {
+    let (c, h) = tokio::try_join!(r.coverage(s), r.health(s)).map_err(sql)?;
+    Ok(StreamCoverage {
+        from_checkpoint: c.from_checkpoint,
+        latest_checkpoint: c.latest_checkpoint,
+        events: c.events,
+        undecodable: h.undecodable,
+        gaps: h.gaps,
+    })
+}
+
+async fn healthz(ctx: &ApiContext) -> ApiResponse {
     let now = (ctx.now)();
     let limit = i64::try_from(ctx.poll_ms.saturating_mul(5)).unwrap_or(i64::MAX);
-    let read = ctx.db.with(|r| {
-        let one = |s: Stream| -> Result<StreamHealthJson, HttpError> {
-            let h = r.poll_state(s).map_err(sql)?;
+    let read = async {
+        let r = ctx.db.begin().await?;
+        let polls =
+            tokio::try_join!(r.poll_state(Stream::AccessGate), r.poll_state(Stream::SealedContent)).map_err(sql);
+        r.end().await;
+        let (a, b) = polls?;
+        let one = |h: sui_indexer_store::PollState| {
             let age = (h.last_success_at != 0).then(|| now - h.last_success_at);
-            Ok(StreamHealthJson { ok: age.is_some_and(|a| a < limit), last_poll_age_ms: age, last_error: h.last_error })
+            StreamHealthJson { ok: age.is_some_and(|a| a < limit), last_poll_age_ms: age, last_error: h.last_error }
         };
-        Ok(Streams { access_gate: one(Stream::AccessGate)?, sealed_content: one(Stream::SealedContent)? })
-    });
-    let streams = match read {
+        Ok::<_, HttpError>(Streams { access_gate: one(a), sealed_content: one(b) })
+    };
+    let streams = match read.await {
         Ok(s) => s,
         Err(e) => {
-            let msg = if e.status == 503 { NOT_READY.to_owned() } else { e.message };
+            let msg = e.message;
             let down = || StreamHealthJson { ok: false, last_poll_age_ms: None, last_error: Some(msg.clone()) };
             Streams { access_gate: down(), sealed_content: down() }
         }
@@ -372,23 +384,26 @@ fn healthz(ctx: &ApiContext) -> ApiResponse {
     json(if ok { 200 } else { 503 }, &HealthBody { ok, streams }, vec![("Cache-Control", "no-store".into())])
 }
 
-fn route(ctx: &ApiContext, req: &ApiRequest, pathname: &str, q: &Params) -> Result<ApiResponse, HttpError> {
+async fn route(ctx: &ApiContext, req: &ApiRequest<'_>, pathname: &str, q: &Params) -> Result<ApiResponse, HttpError> {
     let parts: Vec<&str> = pathname.split('/').filter(|s| !s.is_empty()).collect();
 
     if parts == ["readyz"] {
         // Serving works while polls stall (stale data is still useful, and clients fall back), but
         // not before the ingester has created the database.
         only_params(q, &[])?;
-        return Ok(if ctx.db.ready() {
-            json(200, &ReadyBody { ok: true, error: None }, vec![("Cache-Control", "no-store".into())])
-        } else {
-            json(503, &ReadyBody { ok: false, error: Some(NOT_READY) }, vec![("Cache-Control", "no-store".into())])
+        return Ok(match ctx.db.check().await {
+            Ok(()) => json(200, &ReadyBody { ok: true, error: None }, vec![("Cache-Control", "no-store".into())]),
+            Err(e) if e.status == 503 => {
+                let message = if e.message == UNAVAILABLE { UNAVAILABLE } else { NOT_READY };
+                json(503, &ReadyBody { ok: false, error: Some(message) }, vec![("Cache-Control", "no-store".into())])
+            }
+            Err(e) => return Err(e),
         });
     }
 
     if parts == ["healthz"] {
         only_params(q, &[])?;
-        return Ok(healthz(ctx));
+        return Ok(healthz(ctx).await);
     }
 
     if parts.len() < 3 || parts[0] != "v1" {
@@ -401,27 +416,19 @@ fn route(ctx: &ApiContext, req: &ApiRequest, pathname: &str, q: &Params) -> Resu
 
     if rest == "coverage" {
         only_params(q, &[])?;
-        return ctx.db.with(|r| {
-            let generation = r.generation().map_err(sql)?.unwrap_or_default();
-            let cov = |s: Stream| -> Result<StreamCoverage, HttpError> {
-                let c = r.coverage(s).map_err(sql)?;
-                let h = r.health(s).map_err(sql)?;
-                Ok(StreamCoverage {
-                    from_checkpoint: c.from_checkpoint,
-                    latest_checkpoint: c.latest_checkpoint,
-                    events: c.events,
-                    undecodable: h.undecodable,
-                    gaps: h.gaps,
-                })
-            };
-            let body = CoverageBody {
-                network: &ctx.network,
-                generation: &generation,
-                access_gate: cov(Stream::AccessGate)?,
-                sealed_content: cov(Stream::SealedContent)?,
-            };
+        let r = ctx.db.begin().await?;
+        let out = async {
+            let (generation, access_gate, sealed_content) = tokio::try_join!(
+                async { Ok(r.generation().await.map_err(sql)?.unwrap_or_default()) },
+                stream_coverage(&r, Stream::AccessGate),
+                stream_coverage(&r, Stream::SealedContent)
+            )?;
+            let body = CoverageBody { network: &ctx.network, generation: &generation, access_gate, sealed_content };
             Ok(json(200, &body, vec![("Cache-Control", HEAD.into())]))
-        });
+        }
+        .await;
+        r.end().await;
+        return out;
     }
 
     if rest == "access-gate/events" {
@@ -443,49 +450,61 @@ fn route(ctx: &ApiContext, req: &ApiRequest, pathname: &str, q: &Params) -> Resu
             }
         };
         let gate_id = parse_id(q.get("gate"), "gate")?;
-        return ctx.db.with(|r| {
-            let generation = r.generation().map_err(sql)?.unwrap_or_default();
+        let r = ctx.db.begin().await?;
+        let out = async {
+            let generation = r.generation().await.map_err(sql)?.unwrap_or_default();
             let before_id = parse_before(q.get("before"), &generation)?;
             let limit = parse_limit(q.get("limit"), 20, 100)?;
-            events_page(req, Stream::AccessGate, PageQuery { kinds, gate_id, before_id, limit }, r, &generation)
-        });
+            events_page(req, Stream::AccessGate, PageQuery { kinds, gate_id, before_id, limit }, &r, &generation).await
+        }
+        .await;
+        r.end().await;
+        return out;
     }
 
     if rest == "sealed-content" {
         only_params(q, &["gate", "before", "limit"])?;
         let gate_id = parse_id(q.get("gate"), "gate")?.ok_or_else(|| HttpError::new(400, "gate is required"))?;
-        return ctx.db.with(|r| {
-            let generation = r.generation().map_err(sql)?.unwrap_or_default();
+        let r = ctx.db.begin().await?;
+        let out = async {
+            let generation = r.generation().await.map_err(sql)?.unwrap_or_default();
             let before_id = parse_before(q.get("before"), &generation)?;
             let limit = parse_limit(q.get("limit"), 50, 200)?;
             let q = PageQuery { kinds: None, gate_id: Some(gate_id), before_id, limit };
-            events_page(req, Stream::SealedContent, q, r, &generation)
-        });
+            events_page(req, Stream::SealedContent, q, &r, &generation).await
+        }
+        .await;
+        r.end().await;
+        return out;
     }
 
     if parts.len() == 5 && parts[2] == "gates" && parts[4] == "stats" {
         only_params(q, &[])?;
         let gate_id = parse_id(Some(parts[3]), "gate id")?.ok_or_else(|| HttpError::new(400, "gate id is required"))?;
-        return ctx.db.with(|r| {
-            let stats = r.gate_stats(&gate_id).map_err(sql)?;
-            let from = r.coverage(Stream::AccessGate).map_err(sql)?.from_checkpoint;
+        let r = ctx.db.begin().await?;
+        let out = async {
+            let (stats, coverage) =
+                tokio::try_join!(r.gate_stats(&gate_id), r.coverage(Stream::AccessGate)).map_err(sql)?;
             let body = StatsBody {
                 minted: stats.count("AccessMinted"),
                 consumed: stats.count("AccessConsumed"),
                 burned: stats.count("AccessBurned"),
                 commission_mist: stats.commission_mist.to_string(),
-                indexed_from_checkpoint: from,
+                indexed_from_checkpoint: coverage.from_checkpoint,
                 gate_id,
             };
             Ok(json(200, &body, vec![("Cache-Control", HEAD.into())]))
-        });
+        }
+        .await;
+        r.end().await;
+        return out;
     }
 
     Err(HttpError::new(404, "not found"))
 }
 
 /// Handle one request. Errors of status 500 are returned as `Err` (with the detail to log).
-pub fn handle(ctx: &ApiContext, req: &ApiRequest) -> Result<ApiResponse, String> {
+pub async fn handle(ctx: &ApiContext, req: &ApiRequest<'_>) -> Result<ApiResponse, String> {
     if req.method == "OPTIONS" {
         let mut headers = base_headers();
         headers.push(("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS".into()));
@@ -526,7 +545,7 @@ pub fn handle(ctx: &ApiContext, req: &ApiRequest) -> Result<ApiResponse, String>
             return Ok(ApiResponse { status: 301, headers, body: String::new() });
         }
     }
-    let res = match route(ctx, req, &pathname, &q) {
+    let res = match route(ctx, req, &pathname, &q).await {
         Ok(r) => r,
         Err(e) if e.status == 500 => return Err(e.message),
         Err(e) => error_response(&e),

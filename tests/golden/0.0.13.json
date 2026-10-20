@@ -1,0 +1,714 @@
+[
+  {
+    "method": "GET",
+    "path": "/v1/testnet/coverage",
+    "requestHeader": "",
+    "status": 200,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "public, max-age=10, s-maxage=30"
+    },
+    "body": "{\"network\":\"testnet\",\"generation\":\"e32e37afbbe9\",\"accessGate\":{\"fromCheckpoint\":\"11\",\"latestCheckpoint\":\"20\",\"events\":7,\"undecodable\":2,\"gaps\":1},\"sealedContent\":{\"fromCheckpoint\":\"13\",\"latestCheckpoint\":\"19\",\"events\":3,\"undecodable\":0,\"gaps\":0}}"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/access-gate/events",
+    "requestHeader": "",
+    "status": 200,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "public, max-age=10, s-maxage=30",
+      "etag": "\"e32e37afbbe9-12\""
+    },
+    "body": "{\"events\":[{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessMintedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACgADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAChHOBwAAAAAAAAABAAAAAAAAAA==\",\"checkpoint\":\"20\",\"transactionDigest\":\"fx12\",\"eventIndex\":0},{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessConsumedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACwlub25jZS0xMjMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAoRzgIAAAAAAAAAAgAAAAAAAAA=\",\"checkpoint\":\"18\",\"transactionDigest\":\"fx08\",\"eventIndex\":0},{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessMintedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACgADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAChHOAAAAAAAAABABAAAAAAAAAA==\",\"checkpoint\":\"17\",\"transactionDigest\":\"fx07\",\"eventIndex\":0},{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::PlatformConfigUpdatedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAKEc4UAAAAAAAAACChBwAAAAAAAMqaOwAAAAA=\",\"checkpoint\":\"15\",\"transactionDigest\":\"fx05\",\"eventIndex\":0},{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessMintedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACwADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAChHOiBMAAAAAAAABAAAAAAAAAA==\",\"checkpoint\":\"14\",\"transactionDigest\":\"fx04\",\"eventIndex\":0},{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessConsumedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACglub25jZS0xMjMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAoRzgIAAAAAAAAAAgAAAAAAAAA=\",\"checkpoint\":\"12\",\"transactionDigest\":\"fx02\",\"eventIndex\":0},{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessMintedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACgADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAChHO0AcAAAAAAAABAAAAAAAAAA==\",\"checkpoint\":\"11\",\"transactionDigest\":\"fx01\",\"eventIndex\":0}],\"cursor\":null,\"indexedFromCheckpoint\":\"11\",\"latestCheckpoint\":\"20\",\"polledAt\":1760000000000}"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/access-gate/events?limit=2",
+    "requestHeader": "",
+    "status": 200,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "public, max-age=10, s-maxage=30",
+      "etag": "\"e32e37afbbe9-12\""
+    },
+    "body": "{\"events\":[{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessMintedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACgADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAChHOBwAAAAAAAAABAAAAAAAAAA==\",\"checkpoint\":\"20\",\"transactionDigest\":\"fx12\",\"eventIndex\":0},{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessConsumedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACwlub25jZS0xMjMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAoRzgIAAAAAAAAAAgAAAAAAAAA=\",\"checkpoint\":\"18\",\"transactionDigest\":\"fx08\",\"eventIndex\":0}],\"cursor\":\"e32e37afbbe9.8\",\"indexedFromCheckpoint\":\"11\",\"latestCheckpoint\":\"20\",\"polledAt\":1760000000000}"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/access-gate/events?before=e32e37afbbe9.8&limit=2",
+    "requestHeader": "",
+    "status": 200,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "public, max-age=31536000, immutable",
+      "etag": "\"e32e37afbbe9-b8\""
+    },
+    "body": "{\"events\":[{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessMintedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACgADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAChHOAAAAAAAAABABAAAAAAAAAA==\",\"checkpoint\":\"17\",\"transactionDigest\":\"fx07\",\"eventIndex\":0},{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::PlatformConfigUpdatedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAKEc4UAAAAAAAAACChBwAAAAAAAMqaOwAAAAA=\",\"checkpoint\":\"15\",\"transactionDigest\":\"fx05\",\"eventIndex\":0}],\"cursor\":\"e32e37afbbe9.5\",\"indexedFromCheckpoint\":\"11\"}"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/access-gate/events?before=e32e37afbbe9.4&limit=2",
+    "requestHeader": "",
+    "status": 200,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "public, max-age=31536000, immutable",
+      "etag": "\"e32e37afbbe9-b4\""
+    },
+    "body": "{\"events\":[{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessConsumedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACglub25jZS0xMjMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAoRzgIAAAAAAAAAAgAAAAAAAAA=\",\"checkpoint\":\"12\",\"transactionDigest\":\"fx02\",\"eventIndex\":0},{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessMintedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACgADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAChHO0AcAAAAAAAABAAAAAAAAAA==\",\"checkpoint\":\"11\",\"transactionDigest\":\"fx01\",\"eventIndex\":0}],\"cursor\":null,\"indexedFromCheckpoint\":\"11\"}"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/access-gate/events?before=e32e37afbbe9.2&limit=2",
+    "requestHeader": "",
+    "status": 200,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "public, max-age=31536000, immutable",
+      "etag": "\"e32e37afbbe9-b2\""
+    },
+    "body": "{\"events\":[{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessMintedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACgADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAChHO0AcAAAAAAAABAAAAAAAAAA==\",\"checkpoint\":\"11\",\"transactionDigest\":\"fx01\",\"eventIndex\":0}],\"cursor\":null,\"indexedFromCheckpoint\":\"11\"}"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/access-gate/events?before=e32e37afbbe9.1",
+    "requestHeader": "",
+    "status": 200,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "public, max-age=31536000, immutable",
+      "etag": "\"e32e37afbbe9-b1\""
+    },
+    "body": "{\"events\":[],\"cursor\":null,\"indexedFromCheckpoint\":\"11\"}"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/access-gate/events?before=e32e37afbbe9.9999",
+    "requestHeader": "",
+    "status": 200,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "public, max-age=31536000, immutable",
+      "etag": "\"e32e37afbbe9-b9999\""
+    },
+    "body": "{\"events\":[{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessMintedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACgADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAChHOBwAAAAAAAAABAAAAAAAAAA==\",\"checkpoint\":\"20\",\"transactionDigest\":\"fx12\",\"eventIndex\":0},{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessConsumedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACwlub25jZS0xMjMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAoRzgIAAAAAAAAAAgAAAAAAAAA=\",\"checkpoint\":\"18\",\"transactionDigest\":\"fx08\",\"eventIndex\":0},{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessMintedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACgADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAChHOAAAAAAAAABABAAAAAAAAAA==\",\"checkpoint\":\"17\",\"transactionDigest\":\"fx07\",\"eventIndex\":0},{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::PlatformConfigUpdatedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAKEc4UAAAAAAAAACChBwAAAAAAAMqaOwAAAAA=\",\"checkpoint\":\"15\",\"transactionDigest\":\"fx05\",\"eventIndex\":0},{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessMintedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACwADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAChHOiBMAAAAAAAABAAAAAAAAAA==\",\"checkpoint\":\"14\",\"transactionDigest\":\"fx04\",\"eventIndex\":0},{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessConsumedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACglub25jZS0xMjMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAoRzgIAAAAAAAAAAgAAAAAAAAA=\",\"checkpoint\":\"12\",\"transactionDigest\":\"fx02\",\"eventIndex\":0},{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessMintedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACgADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAChHO0AcAAAAAAAABAAAAAAAAAA==\",\"checkpoint\":\"11\",\"transactionDigest\":\"fx01\",\"eventIndex\":0}],\"cursor\":null,\"indexedFromCheckpoint\":\"11\"}"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/access-gate/events?kinds=AccessMinted",
+    "requestHeader": "",
+    "status": 200,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "public, max-age=10, s-maxage=30",
+      "etag": "\"e32e37afbbe9-12\""
+    },
+    "body": "{\"events\":[{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessMintedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACgADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAChHOBwAAAAAAAAABAAAAAAAAAA==\",\"checkpoint\":\"20\",\"transactionDigest\":\"fx12\",\"eventIndex\":0},{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessMintedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACgADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAChHOAAAAAAAAABABAAAAAAAAAA==\",\"checkpoint\":\"17\",\"transactionDigest\":\"fx07\",\"eventIndex\":0},{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessMintedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACwADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAChHOiBMAAAAAAAABAAAAAAAAAA==\",\"checkpoint\":\"14\",\"transactionDigest\":\"fx04\",\"eventIndex\":0},{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessMintedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACgADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAChHO0AcAAAAAAAABAAAAAAAAAA==\",\"checkpoint\":\"11\",\"transactionDigest\":\"fx01\",\"eventIndex\":0}],\"cursor\":null,\"indexedFromCheckpoint\":\"11\",\"latestCheckpoint\":\"20\",\"polledAt\":1760000000000}"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/access-gate/events?kinds=AccessConsumed",
+    "requestHeader": "",
+    "status": 200,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "public, max-age=10, s-maxage=30",
+      "etag": "\"e32e37afbbe9-12\""
+    },
+    "body": "{\"events\":[{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessConsumedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACwlub25jZS0xMjMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAoRzgIAAAAAAAAAAgAAAAAAAAA=\",\"checkpoint\":\"18\",\"transactionDigest\":\"fx08\",\"eventIndex\":0},{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessConsumedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACglub25jZS0xMjMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAoRzgIAAAAAAAAAAgAAAAAAAAA=\",\"checkpoint\":\"12\",\"transactionDigest\":\"fx02\",\"eventIndex\":0}],\"cursor\":null,\"indexedFromCheckpoint\":\"11\",\"latestCheckpoint\":\"20\",\"polledAt\":1760000000000}"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/access-gate/events?kinds=AccessConsumed%2CAccessMinted",
+    "requestHeader": "",
+    "status": 200,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "public, max-age=10, s-maxage=30",
+      "etag": "\"e32e37afbbe9-12\""
+    },
+    "body": "{\"events\":[{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessMintedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACgADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAChHOBwAAAAAAAAABAAAAAAAAAA==\",\"checkpoint\":\"20\",\"transactionDigest\":\"fx12\",\"eventIndex\":0},{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessConsumedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACwlub25jZS0xMjMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAoRzgIAAAAAAAAAAgAAAAAAAAA=\",\"checkpoint\":\"18\",\"transactionDigest\":\"fx08\",\"eventIndex\":0},{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessMintedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACgADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAChHOAAAAAAAAABABAAAAAAAAAA==\",\"checkpoint\":\"17\",\"transactionDigest\":\"fx07\",\"eventIndex\":0},{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessMintedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACwADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAChHOiBMAAAAAAAABAAAAAAAAAA==\",\"checkpoint\":\"14\",\"transactionDigest\":\"fx04\",\"eventIndex\":0},{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessConsumedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACglub25jZS0xMjMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAoRzgIAAAAAAAAAAgAAAAAAAAA=\",\"checkpoint\":\"12\",\"transactionDigest\":\"fx02\",\"eventIndex\":0},{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessMintedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACgADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAChHO0AcAAAAAAAABAAAAAAAAAA==\",\"checkpoint\":\"11\",\"transactionDigest\":\"fx01\",\"eventIndex\":0}],\"cursor\":null,\"indexedFromCheckpoint\":\"11\",\"latestCheckpoint\":\"20\",\"polledAt\":1760000000000}"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/access-gate/events?kinds=AccessMinted%2CPlatformConfigUpdated&limit=3",
+    "requestHeader": "",
+    "status": 200,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "public, max-age=10, s-maxage=30",
+      "etag": "\"e32e37afbbe9-12\""
+    },
+    "body": "{\"events\":[{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessMintedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACgADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAChHOBwAAAAAAAAABAAAAAAAAAA==\",\"checkpoint\":\"20\",\"transactionDigest\":\"fx12\",\"eventIndex\":0},{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessMintedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACgADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAChHOAAAAAAAAABABAAAAAAAAAA==\",\"checkpoint\":\"17\",\"transactionDigest\":\"fx07\",\"eventIndex\":0},{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::PlatformConfigUpdatedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAKEc4UAAAAAAAAACChBwAAAAAAAMqaOwAAAAA=\",\"checkpoint\":\"15\",\"transactionDigest\":\"fx05\",\"eventIndex\":0}],\"cursor\":\"e32e37afbbe9.5\",\"indexedFromCheckpoint\":\"11\",\"latestCheckpoint\":\"20\",\"polledAt\":1760000000000}"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/access-gate/events?kinds=AccessBurned",
+    "requestHeader": "",
+    "status": 200,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "public, max-age=10, s-maxage=30",
+      "etag": "\"e32e37afbbe9-12\""
+    },
+    "body": "{\"events\":[],\"cursor\":null,\"indexedFromCheckpoint\":\"11\",\"latestCheckpoint\":\"20\",\"polledAt\":1760000000000}"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/access-gate/events?gate=0x000000000000000000000000000000000000000000000000000000000000000a",
+    "requestHeader": "",
+    "status": 200,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "public, max-age=10, s-maxage=30",
+      "etag": "\"e32e37afbbe9-12\""
+    },
+    "body": "{\"events\":[{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessMintedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACgADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAChHOBwAAAAAAAAABAAAAAAAAAA==\",\"checkpoint\":\"20\",\"transactionDigest\":\"fx12\",\"eventIndex\":0},{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessMintedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACgADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAChHOAAAAAAAAABABAAAAAAAAAA==\",\"checkpoint\":\"17\",\"transactionDigest\":\"fx07\",\"eventIndex\":0},{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessConsumedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACglub25jZS0xMjMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAoRzgIAAAAAAAAAAgAAAAAAAAA=\",\"checkpoint\":\"12\",\"transactionDigest\":\"fx02\",\"eventIndex\":0},{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessMintedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACgADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAChHO0AcAAAAAAAABAAAAAAAAAA==\",\"checkpoint\":\"11\",\"transactionDigest\":\"fx01\",\"eventIndex\":0}],\"cursor\":null,\"indexedFromCheckpoint\":\"11\",\"latestCheckpoint\":\"20\",\"polledAt\":1760000000000}"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/access-gate/events?gate=0x000000000000000000000000000000000000000000000000000000000000000b&limit=1",
+    "requestHeader": "",
+    "status": 200,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "public, max-age=10, s-maxage=30",
+      "etag": "\"e32e37afbbe9-12\""
+    },
+    "body": "{\"events\":[{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessConsumedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACwlub25jZS0xMjMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAoRzgIAAAAAAAAAAgAAAAAAAAA=\",\"checkpoint\":\"18\",\"transactionDigest\":\"fx08\",\"eventIndex\":0}],\"cursor\":\"e32e37afbbe9.8\",\"indexedFromCheckpoint\":\"11\",\"latestCheckpoint\":\"20\",\"polledAt\":1760000000000}"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/access-gate/events?gate=0x000000000000000000000000000000000000000000000000000000000000000a&kinds=AccessMinted",
+    "requestHeader": "",
+    "status": 200,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "public, max-age=10, s-maxage=30",
+      "etag": "\"e32e37afbbe9-12\""
+    },
+    "body": "{\"events\":[{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessMintedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACgADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAChHOBwAAAAAAAAABAAAAAAAAAA==\",\"checkpoint\":\"20\",\"transactionDigest\":\"fx12\",\"eventIndex\":0},{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessMintedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACgADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAChHOAAAAAAAAABABAAAAAAAAAA==\",\"checkpoint\":\"17\",\"transactionDigest\":\"fx07\",\"eventIndex\":0},{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessMintedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACgADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAChHO0AcAAAAAAAABAAAAAAAAAA==\",\"checkpoint\":\"11\",\"transactionDigest\":\"fx01\",\"eventIndex\":0}],\"cursor\":null,\"indexedFromCheckpoint\":\"11\",\"latestCheckpoint\":\"20\",\"polledAt\":1760000000000}"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/access-gate/events?gate=0x000000000000000000000000000000000000000000000000000000000000000a&kinds=AccessConsumed%2CAccessMinted&limit=2",
+    "requestHeader": "",
+    "status": 200,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "public, max-age=10, s-maxage=30",
+      "etag": "\"e32e37afbbe9-12\""
+    },
+    "body": "{\"events\":[{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessMintedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACgADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAChHOBwAAAAAAAAABAAAAAAAAAA==\",\"checkpoint\":\"20\",\"transactionDigest\":\"fx12\",\"eventIndex\":0},{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessMintedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACgADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAChHOAAAAAAAAABABAAAAAAAAAA==\",\"checkpoint\":\"17\",\"transactionDigest\":\"fx07\",\"eventIndex\":0}],\"cursor\":\"e32e37afbbe9.7\",\"indexedFromCheckpoint\":\"11\",\"latestCheckpoint\":\"20\",\"polledAt\":1760000000000}"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/access-gate/events?before=e32e37afbbe9.8&gate=0x000000000000000000000000000000000000000000000000000000000000000a&limit=1",
+    "requestHeader": "",
+    "status": 200,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "public, max-age=31536000, immutable",
+      "etag": "\"e32e37afbbe9-b8\""
+    },
+    "body": "{\"events\":[{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessMintedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACgADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAChHOAAAAAAAAABABAAAAAAAAAA==\",\"checkpoint\":\"17\",\"transactionDigest\":\"fx07\",\"eventIndex\":0}],\"cursor\":\"e32e37afbbe9.7\",\"indexedFromCheckpoint\":\"11\"}"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/access-gate/events?gate=0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "requestHeader": "",
+    "status": 200,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "public, max-age=10, s-maxage=30",
+      "etag": "\"e32e37afbbe9-12\""
+    },
+    "body": "{\"events\":[],\"cursor\":null,\"indexedFromCheckpoint\":\"11\",\"latestCheckpoint\":\"20\",\"polledAt\":1760000000000}"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/sealed-content?gate=0x000000000000000000000000000000000000000000000000000000000000000a",
+    "requestHeader": "",
+    "status": 200,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "public, max-age=10, s-maxage=30",
+      "etag": "\"e32e37afbbe9-9\""
+    },
+    "body": "{\"events\":[{\"eventType\":\"0x000000000000000000000000000000000000000000000000000000000000005e::sealed_content::SealedContentPublished\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACgRibG9iBHNlYWwDdHdvAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAKEc4=\",\"checkpoint\":\"19\",\"transactionDigest\":\"fx09\",\"eventIndex\":0},{\"eventType\":\"0x000000000000000000000000000000000000000000000000000000000000005e::sealed_content::SealedContentPublished\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACgRibG9iBHNlYWwDb25lAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAKEc4=\",\"checkpoint\":\"13\",\"transactionDigest\":\"fx03\",\"eventIndex\":0}],\"cursor\":null,\"indexedFromCheckpoint\":\"13\",\"latestCheckpoint\":\"19\",\"polledAt\":1760000000000}"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/sealed-content?gate=0x000000000000000000000000000000000000000000000000000000000000000b&limit=1",
+    "requestHeader": "",
+    "status": 200,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "public, max-age=10, s-maxage=30",
+      "etag": "\"e32e37afbbe9-9\""
+    },
+    "body": "{\"events\":[{\"eventType\":\"0x000000000000000000000000000000000000000000000000000000000000005e::sealed_content::SealedContentPublished\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACwRibG9iBHNlYWwFb3RoZXIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAoRzg==\",\"checkpoint\":\"16\",\"transactionDigest\":\"fx06\",\"eventIndex\":0}],\"cursor\":null,\"indexedFromCheckpoint\":\"13\",\"latestCheckpoint\":\"19\",\"polledAt\":1760000000000}"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/sealed-content?gate=0x000000000000000000000000000000000000000000000000000000000000000a&limit=1",
+    "requestHeader": "",
+    "status": 200,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "public, max-age=10, s-maxage=30",
+      "etag": "\"e32e37afbbe9-9\""
+    },
+    "body": "{\"events\":[{\"eventType\":\"0x000000000000000000000000000000000000000000000000000000000000005e::sealed_content::SealedContentPublished\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACgRibG9iBHNlYWwDdHdvAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAKEc4=\",\"checkpoint\":\"19\",\"transactionDigest\":\"fx09\",\"eventIndex\":0}],\"cursor\":\"e32e37afbbe9.9\",\"indexedFromCheckpoint\":\"13\",\"latestCheckpoint\":\"19\",\"polledAt\":1760000000000}"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/sealed-content?before=e32e37afbbe9.9&gate=0x000000000000000000000000000000000000000000000000000000000000000a",
+    "requestHeader": "",
+    "status": 200,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "public, max-age=31536000, immutable",
+      "etag": "\"e32e37afbbe9-b9\""
+    },
+    "body": "{\"events\":[{\"eventType\":\"0x000000000000000000000000000000000000000000000000000000000000005e::sealed_content::SealedContentPublished\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACgRibG9iBHNlYWwDb25lAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAKEc4=\",\"checkpoint\":\"13\",\"transactionDigest\":\"fx03\",\"eventIndex\":0}],\"cursor\":null,\"indexedFromCheckpoint\":\"13\"}"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/gates/0x000000000000000000000000000000000000000000000000000000000000000a/stats",
+    "requestHeader": "",
+    "status": 200,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "public, max-age=10, s-maxage=30"
+    },
+    "body": "{\"gateId\":\"0x000000000000000000000000000000000000000000000000000000000000000a\",\"minted\":3,\"consumed\":1,\"burned\":0,\"commissionMist\":\"1152921504606848983\",\"indexedFromCheckpoint\":\"11\"}"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/gates/0x000000000000000000000000000000000000000000000000000000000000000b/stats",
+    "requestHeader": "",
+    "status": 200,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "public, max-age=10, s-maxage=30"
+    },
+    "body": "{\"gateId\":\"0x000000000000000000000000000000000000000000000000000000000000000b\",\"minted\":1,\"consumed\":1,\"burned\":0,\"commissionMist\":\"5000\",\"indexedFromCheckpoint\":\"11\"}"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/gates/0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff/stats",
+    "requestHeader": "",
+    "status": 200,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "public, max-age=10, s-maxage=30"
+    },
+    "body": "{\"gateId\":\"0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\",\"minted\":0,\"consumed\":0,\"burned\":0,\"commissionMist\":\"0\",\"indexedFromCheckpoint\":\"11\"}"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/access-gate/events",
+    "requestHeader": "If-None-Match: \"e32e37afbbe9-12\"",
+    "status": 304,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "cache-control": "public, max-age=10, s-maxage=30",
+      "etag": "\"e32e37afbbe9-12\""
+    },
+    "body": ""
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/access-gate/events",
+    "requestHeader": "If-None-Match: W/\"e32e37afbbe9-12\"",
+    "status": 304,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "cache-control": "public, max-age=10, s-maxage=30",
+      "etag": "\"e32e37afbbe9-12\""
+    },
+    "body": ""
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/access-gate/events",
+    "requestHeader": "If-None-Match: \"e32e37afbbe9-11\"",
+    "status": 200,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "public, max-age=10, s-maxage=30",
+      "etag": "\"e32e37afbbe9-12\""
+    },
+    "body": "{\"events\":[{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessMintedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACgADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAChHOBwAAAAAAAAABAAAAAAAAAA==\",\"checkpoint\":\"20\",\"transactionDigest\":\"fx12\",\"eventIndex\":0},{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessConsumedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACwlub25jZS0xMjMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAoRzgIAAAAAAAAAAgAAAAAAAAA=\",\"checkpoint\":\"18\",\"transactionDigest\":\"fx08\",\"eventIndex\":0},{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessMintedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACgADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAChHOAAAAAAAAABABAAAAAAAAAA==\",\"checkpoint\":\"17\",\"transactionDigest\":\"fx07\",\"eventIndex\":0},{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::PlatformConfigUpdatedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAKEc4UAAAAAAAAACChBwAAAAAAAMqaOwAAAAA=\",\"checkpoint\":\"15\",\"transactionDigest\":\"fx05\",\"eventIndex\":0},{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessMintedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACwADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAChHOiBMAAAAAAAABAAAAAAAAAA==\",\"checkpoint\":\"14\",\"transactionDigest\":\"fx04\",\"eventIndex\":0},{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessConsumedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACglub25jZS0xMjMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAoRzgIAAAAAAAAAAgAAAAAAAAA=\",\"checkpoint\":\"12\",\"transactionDigest\":\"fx02\",\"eventIndex\":0},{\"eventType\":\"0x00000000000000000000000000000000000000000000000000000000000000a1::access_gate::AccessMintedEvent\",\"sender\":\"0x00000000000000000000000000000000000000000000000000000000000a11ce\",\"bcs\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACgADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAChHO0AcAAAAAAAABAAAAAAAAAA==\",\"checkpoint\":\"11\",\"transactionDigest\":\"fx01\",\"eventIndex\":0}],\"cursor\":null,\"indexedFromCheckpoint\":\"11\",\"latestCheckpoint\":\"20\",\"polledAt\":1760000000000}"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/access-gate/events?before=e32e37afbbe9.8&limit=2",
+    "requestHeader": "If-None-Match: \"e32e37afbbe9-b8\"",
+    "status": 304,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "cache-control": "public, max-age=31536000, immutable",
+      "etag": "\"e32e37afbbe9-b8\""
+    },
+    "body": ""
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/access-gate/events?before=000000000000.5",
+    "requestHeader": "",
+    "status": 410,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store"
+    },
+    "body": "{\"error\":\"cursor is from an earlier index; start from the newest page\"}"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/access-gate/events?limit=0",
+    "requestHeader": "",
+    "status": 400,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store"
+    },
+    "body": "{\"error\":\"limit must be in [1, 100]\"}"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/access-gate/events?limit=101",
+    "requestHeader": "",
+    "status": 400,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store"
+    },
+    "body": "{\"error\":\"limit must be in [1, 100]\"}"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/access-gate/events?limit=abc",
+    "requestHeader": "",
+    "status": 400,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store"
+    },
+    "body": "{\"error\":\"limit must be an integer\"}"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/access-gate/events?gate=zz",
+    "requestHeader": "",
+    "status": 400,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store"
+    },
+    "body": "{\"error\":\"gate must be a 0x-prefixed hex id\"}"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/access-gate/events?kinds=Nope",
+    "requestHeader": "",
+    "status": 400,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store"
+    },
+    "body": "{\"error\":\"unknown kinds: Nope\"}"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/access-gate/events?kinds=",
+    "requestHeader": "",
+    "status": 400,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store"
+    },
+    "body": "{\"error\":\"unknown kinds: (empty)\"}"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/access-gate/events?before=garbage",
+    "requestHeader": "",
+    "status": 400,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store"
+    },
+    "body": "{\"error\":\"before must be a cursor from a previous page\"}"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/access-gate/events?cachebuster=1",
+    "requestHeader": "",
+    "status": 400,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store"
+    },
+    "body": "{\"error\":\"unknown query parameter: cachebuster\"}"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/sealed-content",
+    "requestHeader": "",
+    "status": 400,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store"
+    },
+    "body": "{\"error\":\"gate is required\"}"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/sealed-content?gate=0x000000000000000000000000000000000000000000000000000000000000000a&limit=201",
+    "requestHeader": "",
+    "status": 400,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store"
+    },
+    "body": "{\"error\":\"limit must be in [1, 200]\"}"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/coverage?x=1",
+    "requestHeader": "",
+    "status": 400,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store"
+    },
+    "body": "{\"error\":\"unknown query parameter: x\"}"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/mainnet/access-gate/events",
+    "requestHeader": "",
+    "status": 404,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "public, max-age=60"
+    },
+    "body": "{\"error\":\"this indexer serves testnet only\"}"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/nothing",
+    "requestHeader": "",
+    "status": 404,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "public, max-age=60"
+    },
+    "body": "{\"error\":\"not found\"}"
+  },
+  {
+    "method": "GET",
+    "path": "/",
+    "requestHeader": "",
+    "status": 404,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "public, max-age=60"
+    },
+    "body": "{\"error\":\"not found\"}"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/access-gate/events?limit=05",
+    "requestHeader": "",
+    "status": 301,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "location": "/v1/testnet/access-gate/events?limit=5",
+      "cache-control": "public, max-age=86400"
+    },
+    "body": ""
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/access-gate/events?gate=0xA",
+    "requestHeader": "",
+    "status": 301,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "location": "/v1/testnet/access-gate/events?gate=0x000000000000000000000000000000000000000000000000000000000000000a",
+      "cache-control": "public, max-age=86400"
+    },
+    "body": ""
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/access-gate/events?kinds=AccessMinted,AccessConsumed,AccessMinted",
+    "requestHeader": "",
+    "status": 301,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "location": "/v1/testnet/access-gate/events?kinds=AccessConsumed%2CAccessMinted",
+      "cache-control": "public, max-age=86400"
+    },
+    "body": ""
+  },
+  {
+    "method": "GET",
+    "path": "/v1/testnet/gates/0xA/stats",
+    "requestHeader": "",
+    "status": 301,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "location": "/v1/testnet/gates/0x000000000000000000000000000000000000000000000000000000000000000a/stats",
+      "cache-control": "public, max-age=86400"
+    },
+    "body": ""
+  },
+  {
+    "method": "GET",
+    "path": "/readyz",
+    "requestHeader": "",
+    "status": 200,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store"
+    },
+    "body": "{\"ok\":true}"
+  },
+  {
+    "method": "OPTIONS",
+    "path": "/v1/testnet/coverage",
+    "requestHeader": "",
+    "status": 204,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "access-control-allow-methods": "GET, HEAD, OPTIONS",
+      "access-control-max-age": "86400"
+    },
+    "body": ""
+  },
+  {
+    "method": "POST",
+    "path": "/v1/testnet/coverage",
+    "requestHeader": "",
+    "status": 405,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "content-type": "application/json; charset=utf-8",
+      "allow": "GET, HEAD, OPTIONS"
+    },
+    "body": "{\"error\":\"method not allowed\"}"
+  },
+  {
+    "method": "HEAD",
+    "path": "/v1/testnet/coverage",
+    "requestHeader": "",
+    "status": 200,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "x-content-type-options": "nosniff",
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "public, max-age=10, s-maxage=30"
+    },
+    "body": ""
+  }
+]

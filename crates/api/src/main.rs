@@ -1,4 +1,4 @@
-//! `api` — the sui-indexer read API (no chain access, read-only database).
+//! `api` — the sui-indexer read API (no chain access; the SELECT-only database role).
 
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -30,14 +30,27 @@ fn main() -> ExitCode {
                 return ExitCode::FAILURE;
             }
         };
-        let ctx = Arc::new(context(&cfg));
+        let ctx = match context(&cfg) {
+            Ok(c) => Arc::new(c),
+            Err(e) => {
+                log(&format!("refusing to start: {e}"));
+                return ExitCode::FAILURE;
+            }
+        };
         log(&format!(
-            "sui-indexer api {} {} on :{} — database {} (read-only){}",
+            "sui-indexer api {} {} on :{} — database {} at {}:{} as {} (read-only, pool {}){}",
             env!("CARGO_PKG_VERSION"),
             cfg.network,
             cfg.port,
-            cfg.db_path,
-            if ctx.db.ready() { "" } else { "; not created yet, answering 503 until the ingester creates it" }
+            cfg.database.dbname(),
+            cfg.database.host(),
+            cfg.database.port(),
+            cfg.database.user(),
+            cfg.pool_size,
+            match ctx.db.check().await {
+                Ok(()) => String::new(),
+                Err(e) => format!("; {}: answering 503 until the ingester has migrated and started", e.message),
+            }
         ));
         server::serve(listener, ctx, shutdown_signal()).await;
         log("stopped");

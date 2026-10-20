@@ -50,7 +50,7 @@ fn to_hyper(res: ApiResponse) -> Response<Full<Bytes>> {
 }
 
 /// Answer one request (the transport-independent [`handle`] plus the 500 fallback).
-pub fn respond(ctx: &ApiContext, req: &Request<Incoming>, peer: &SocketAddr) -> Response<Full<Bytes>> {
+pub async fn respond(ctx: &ApiContext, req: &Request<Incoming>, peer: &SocketAddr) -> Response<Full<Bytes>> {
     let cf = header(req, "cf-connecting-ip");
     let inm = header(req, "if-none-match");
     let remote = peer.ip().to_string();
@@ -62,7 +62,7 @@ pub fn respond(ctx: &ApiContext, req: &Request<Incoming>, peer: &SocketAddr) -> 
         if_none_match: inm.as_deref(),
         remote_address: Some(&remote),
     };
-    match handle(ctx, &api) {
+    match handle(ctx, &api).await {
         Ok(res) => to_hyper(res),
         Err(detail) => {
             log(&format!("request failed: {} {}: {detail}", api.method, api.path));
@@ -106,7 +106,7 @@ pub async fn serve(listener: TcpListener, ctx: Arc<ApiContext>, shutdown: impl F
         let service = service_fn(move |req: Request<Incoming>| {
             let ctx = ctx.clone();
             async move {
-                let res = tokio::time::timeout(REQUEST_TIMEOUT, async { respond(&ctx, &req, &peer) }).await;
+                let res = tokio::time::timeout(REQUEST_TIMEOUT, respond(&ctx, &req, &peer)).await;
                 Ok::<_, Infallible>(res.unwrap_or_else(|_| {
                     let mut r = Response::new(Full::new(Bytes::new()));
                     *r.status_mut() = StatusCode::REQUEST_TIMEOUT;

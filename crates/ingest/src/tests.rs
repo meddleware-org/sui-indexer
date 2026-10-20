@@ -9,7 +9,8 @@ use std::time::Duration;
 
 use proptest::prelude::*;
 use serde_json::json;
-use sui_indexer_store::{ALIVE_KEY, Store, Stream};
+use sui_indexer_store::testdb::TestDb;
+use sui_indexer_store::{ALIVE_KEY, DatabaseSettings, Stream, require_db};
 use sui_indexer_testkit::{self as kit, Fixture, addr, consumed, gate_a, gate_b, minted, platform_updated, sealed};
 
 use super::*;
@@ -95,15 +96,15 @@ fn pages(entries: Vec<(String, Vec<Vec<RawEvent>>)>) -> Pages {
 
 type Logs = Rc<RefCell<Vec<String>>>;
 
-fn ingestor_with(source: Fake, opts: IngestOptions) -> (Ingestor<Fake>, Logs) {
+async fn ingestor_with(db: &TestDb, source: Fake, opts: IngestOptions) -> (Ingestor<Fake>, Logs) {
     let logs: Logs = Rc::default();
     let sink = logs.clone();
     let log: Logger = Box::new(move |m| sink.borrow_mut().push(m.to_owned()));
-    (Ingestor::new(Store::open(":memory:").unwrap(), source, opts, log), logs)
+    (Ingestor::new(db.store().await, source, opts, log).await, logs)
 }
 
-fn ingestor(source: Fake) -> (Ingestor<Fake>, Logs) {
-    ingestor_with(source, IngestOptions::new(packages()))
+async fn ingestor(db: &TestDb, source: Fake) -> (Ingestor<Fake>, Logs) {
+    ingestor_with(db, source, IngestOptions::new(packages())).await
 }
 
 // ── to_indexed ──────────────────────────────────────────────────────────────
@@ -207,6 +208,7 @@ fn polls_the_whole_access_gate_module_and_the_one_sealed_content_event() {
 
 #[tokio::test]
 async fn stores_every_page_with_its_cursor_ascending_and_resumes_from_the_cursor() {
+    let db = require_db!();
     let p = pages(vec![
         (
             ag_filter(),
@@ -217,16 +219,16 @@ async fn stores_every_page_with_its_cursor_ascending_and_resumes_from_the_cursor
         ),
         (seal_filter(), vec![vec![raw(&sealed(&gate_a(), 4, "x"))]]),
     ]);
-    let (mut ing, _) = ingestor(Fake::new(paged(p.clone())));
+    let (mut ing, _) = ingestor(&db, Fake::new(paged(p.clone()))).await;
     ing.poll().await;
     let s = ing.store();
-    let cov = s.coverage(Stream::AccessGate).unwrap();
+    let cov = s.coverage(Stream::AccessGate).await.unwrap();
     assert_eq!(
         (cov.from_checkpoint.as_deref(), cov.latest_checkpoint.as_deref(), cov.events),
         (Some("1"), Some("3"), 3)
     );
-    assert_eq!(s.coverage(Stream::SealedContent).unwrap().events, 1);
-    assert_eq!(s.cursor(Stream::AccessGate).unwrap().as_deref(), Some("1"));
+    assert_eq!(s.coverage(Stream::SealedContent).await.unwrap().events, 1);
+    assert_eq!(s.cursor(Stream::AccessGate).await.unwrap().as_deref(), Some("1"));
     assert!(ing.last_success_at() > 0);
     // Every request: ascending (the source contract), page size 50, the stream's filter.
     for c in ing.source().calls.borrow().iter() {
@@ -239,46 +241,54 @@ async fn stores_every_page_with_its_cursor_ascending_and_resumes_from_the_cursor
     ing.poll().await;
     let first = ing.source().calls.borrow()[0].clone();
     assert_eq!((first.event_type.as_str(), first.after.as_deref()), (ag_filter().as_str(), Some("1")));
-    let cov = ing.store().coverage(Stream::AccessGate).unwrap();
+    let cov = ing.store().coverage(Stream::AccessGate).await.unwrap();
     assert_eq!((cov.latest_checkpoint.as_deref(), cov.events), (Some("9"), 4));
+    assert!(ing.store().verify_counters().await.unwrap().is_empty());
 }
 
 #[tokio::test]
 async fn keeps_the_cursor_when_the_node_reports_no_position() {
-    let (ing, _) = ingestor(Fake::new(paged(pages(vec![]))));
-    ing.store().ingest(Stream::AccessGate, &[], Some("kept")).unwrap();
+    let db = require_db!();
+    let (mut ing, _) = ingestor(&db, Fake::new(paged(pages(vec![])))).await;
+    ing.store_mut().ingest(Stream::AccessGate, &[], Some("kept")).await.unwrap();
     ing.poll_stream(Stream::AccessGate).await.unwrap();
-    assert_eq!(ing.store().cursor(Stream::AccessGate).unwrap().as_deref(), Some("kept"));
+    assert_eq!(ing.store().cursor(Stream::AccessGate).await.unwrap().as_deref(), Some("kept"));
 }
 
 #[tokio::test]
 async fn bounds_every_full_node_request() {
+    let db = require_db!();
     let mut fake = Fake::new(paged(pages(vec![])));
     fake.hang = true;
     let mut opts = IngestOptions::new(packages());
     opts.request_timeout = Duration::from_millis(20);
-    let (ing, _) = ingestor_with(fake, opts);
+    let (mut ing, _) = ingestor_with(&db, fake, opts).await;
     let err = ing.poll_stream(Stream::AccessGate).await.unwrap_err();
     assert!(err.contains("timed out"), "{err}");
 }
 
 #[tokio::test]
 async fn stops_at_the_page_budget_so_one_stream_cannot_starve_the_other() {
+    let db = require_db!();
     let many = (1..=5).map(|i| vec![raw(&minted(&gate_a(), i, 1))]).collect();
     let mut opts = IngestOptions::new(packages());
     opts.max_pages_per_poll = 2;
-    let (ing, _) = ingestor_with(Fake::new(paged(pages(vec![(ag_filter(), many)]))), opts);
+    let (mut ing, _) = ingestor_with(&db, Fake::new(paged(pages(vec![(ag_filter(), many)]))), opts).await;
     ing.poll_stream(Stream::AccessGate).await.unwrap();
-    assert_eq!(ing.store().coverage(Stream::AccessGate).unwrap().events, 2);
+    assert_eq!(ing.store().coverage(Stream::AccessGate).await.unwrap().events, 2);
 }
 
 #[tokio::test]
 async fn a_stored_row_is_the_nodes_event_byte_for_byte() {
+    let db = require_db!();
     let f = consumed(&gate_a(), 3);
-    let (ing, _) = ingestor(Fake::new(paged(pages(vec![(ag_filter(), vec![vec![raw(&f)]])]))));
+    let (mut ing, _) = ingestor(&db, Fake::new(paged(pages(vec![(ag_filter(), vec![vec![raw(&f)]])])))).await;
     ing.poll_stream(Stream::AccessGate).await.unwrap();
-    let page =
-        ing.store().page(Stream::AccessGate, &sui_indexer_store::PageQuery { limit: 1, ..Default::default() }).unwrap();
+    let page = ing
+        .store()
+        .page(Stream::AccessGate, &sui_indexer_store::PageQuery { limit: 1, ..Default::default() })
+        .await
+        .unwrap();
     let row = &page.rows[0];
     assert_eq!(row.bcs, f.bcs);
     assert_eq!(row.event_type, f.event_type);
@@ -288,39 +298,43 @@ async fn a_stored_row_is_the_nodes_event_byte_for_byte() {
 
 #[tokio::test]
 async fn skips_and_counts_an_undecodable_event_keeps_its_page_mates_and_advances() {
+    let db = require_db!();
     let mut bad = raw(&minted(&gate_a(), 2, 1));
     bad.json = Some(json!({ "nft_id": "0x1" }));
     let page = vec![raw(&minted(&gate_a(), 1, 1)), bad, raw(&minted(&gate_b(), 3, 1))];
-    let (mut ing, logs) = ingestor(Fake::new(paged(pages(vec![(ag_filter(), vec![page])]))));
+    let (mut ing, logs) = ingestor(&db, Fake::new(paged(pages(vec![(ag_filter(), vec![page])])))).await;
     ing.poll().await;
     let s = ing.store();
-    assert_eq!(s.coverage(Stream::AccessGate).unwrap().events, 2);
-    assert_eq!(s.health(Stream::AccessGate).unwrap().undecodable, 1);
-    assert_eq!(s.cursor(Stream::AccessGate).unwrap().as_deref(), Some("0")); // advanced past the page
+    assert_eq!(s.coverage(Stream::AccessGate).await.unwrap().events, 2);
+    assert_eq!(s.health(Stream::AccessGate).await.unwrap().undecodable, 1);
+    assert_eq!(s.cursor(Stream::AccessGate).await.unwrap().as_deref(), Some("0")); // advanced past the page
     assert!(logs.borrow().iter().any(|l| l.contains("UNDECODABLE")));
 }
 
 #[tokio::test]
 async fn skips_unrecognised_events_and_logs_how_many() {
+    let db = require_db!();
     let mut foreign = raw(&minted(&gate_a(), 2, 1));
     foreign.event_type = format!("{}::access_gate::Unknown", kit::ag());
     let (mut ing, logs) =
-        ingestor(Fake::new(paged(pages(vec![(ag_filter(), vec![vec![raw(&minted(&gate_a(), 1, 1)), foreign]])]))));
+        ingestor(&db, Fake::new(paged(pages(vec![(ag_filter(), vec![vec![raw(&minted(&gate_a(), 1, 1)), foreign]])]))))
+            .await;
     ing.poll().await;
-    assert_eq!(ing.store().coverage(Stream::AccessGate).unwrap().events, 1);
-    assert_eq!(ing.store().health(Stream::AccessGate).unwrap().undecodable, 0);
+    assert_eq!(ing.store().coverage(Stream::AccessGate).await.unwrap().events, 1);
+    assert_eq!(ing.store().health(Stream::AccessGate).await.unwrap().undecodable, 0);
     assert!(logs.borrow().iter().any(|l| l == "access-gate: skipped 1 unrecognised event(s)"));
 }
 
 #[tokio::test]
 async fn polls_the_streams_independently_and_health_names_the_failing_one() {
+    let db = require_db!();
     let ok = paged(pages(vec![(seal_filter(), vec![vec![raw(&sealed(&gate_a(), 4, "x"))]])]));
     let ag = ag_filter();
     let fake =
         Fake::new(Box::new(move |req| if req.event_type == ag { Err("node unavailable".into()) } else { ok(req) }));
-    let (mut ing, _) = ingestor(fake);
+    let (mut ing, _) = ingestor(&db, fake).await;
     ing.poll().await;
-    assert_eq!(ing.store().coverage(Stream::SealedContent).unwrap().events, 1);
+    assert_eq!(ing.store().coverage(Stream::SealedContent).await.unwrap().events, 1);
     let h = ing.health(Stream::AccessGate);
     assert_eq!((h.last_success_at, h.last_error.as_deref()), (0, Some("node unavailable")));
     assert!(h.last_attempt_at > 0);
@@ -328,13 +342,17 @@ async fn polls_the_streams_independently_and_health_names_the_failing_one() {
     assert!(h.last_success_at > 0 && h.last_error.is_none());
     assert_eq!(ing.last_success_at(), 0); // the oldest stream's success: not healthy as a whole
     // The heartbeats the API reads.
-    assert_eq!(ing.store().poll_state(Stream::AccessGate).unwrap().last_error.as_deref(), Some("node unavailable"));
-    assert!(ing.store().poll_state(Stream::SealedContent).unwrap().last_success_at > 0);
-    assert!(ing.store().meta(ALIVE_KEY).unwrap().is_some());
+    assert_eq!(
+        ing.store().poll_state(Stream::AccessGate).await.unwrap().last_error.as_deref(),
+        Some("node unavailable")
+    );
+    assert!(ing.store().poll_state(Stream::SealedContent).await.unwrap().last_success_at > 0);
+    assert!(ing.store().heartbeat(ALIVE_KEY).await.unwrap().is_some());
 }
 
 #[tokio::test]
 async fn restarts_from_the_nodes_earliest_data_when_the_cursor_fell_below_its_retention() {
+    let db = require_db!();
     let ag = ag_filter();
     let fresh = raw(&minted(&gate_a(), 50, 1));
     let fake = Fake::new(Box::new(move |req| {
@@ -346,15 +364,18 @@ async fn restarts_from_the_nodes_earliest_data_when_the_cursor_fell_below_its_re
         }
         Ok(SourcePage { events: vec![fresh.clone()], has_next_page: false, end_cursor: Some("fresh".into()) })
     }));
-    let (mut ing, logs) = ingestor(fake);
-    ing.store().ingest(Stream::AccessGate, &[minted(&gate_a(), 1, 1).indexed()], Some("stale-cursor")).unwrap();
+    let (mut ing, logs) = ingestor(&db, fake).await;
+    ing.store_mut()
+        .ingest(Stream::AccessGate, &[minted(&gate_a(), 1, 1).indexed()], Some("stale-cursor"))
+        .await
+        .unwrap();
     ing.poll().await;
     let s = ing.store();
-    assert_eq!(s.cursor(Stream::AccessGate).unwrap().as_deref(), Some("fresh"));
-    let cov = s.coverage(Stream::AccessGate).unwrap();
+    assert_eq!(s.cursor(Stream::AccessGate).await.unwrap().as_deref(), Some("fresh"));
+    let cov = s.coverage(Stream::AccessGate).await.unwrap();
     assert_eq!((cov.events, cov.latest_checkpoint.as_deref()), (2, Some("50")));
-    assert_eq!(s.health(Stream::AccessGate).unwrap().gaps, 1);
-    assert!(s.meta("gap:access-gate").unwrap().unwrap().contains("below earliest available"));
+    assert_eq!(s.health(Stream::AccessGate).await.unwrap().gaps, 1);
+    assert!(s.meta("gap:access-gate").await.unwrap().unwrap().contains("below earliest available"));
     assert_eq!(ing.health(Stream::AccessGate).last_error, None);
     assert!(logs.borrow().iter().any(|l| l.contains("below the node's retention")));
     assert!(ing.source().calls.borrow().len() > 1);
@@ -362,19 +383,21 @@ async fn restarts_from_the_nodes_earliest_data_when_the_cursor_fell_below_its_re
 
 #[tokio::test]
 async fn does_not_swallow_other_failures_as_a_gap() {
-    let (mut ing, _) = ingestor(Fake::new(Box::new(|_| Err("503 from fullnode".into()))));
-    ing.store().ingest(Stream::AccessGate, &[], Some("c")).unwrap();
+    let db = require_db!();
+    let (mut ing, _) = ingestor(&db, Fake::new(Box::new(|_| Err("503 from fullnode".into())))).await;
+    ing.store_mut().ingest(Stream::AccessGate, &[], Some("c")).await.unwrap();
     ing.poll().await;
-    assert_eq!(ing.store().cursor(Stream::AccessGate).unwrap().as_deref(), Some("c"));
-    assert_eq!(ing.store().health(Stream::AccessGate).unwrap().gaps, 0);
+    assert_eq!(ing.store().cursor(Stream::AccessGate).await.unwrap().as_deref(), Some("c"));
+    assert_eq!(ing.store().health(Stream::AccessGate).await.unwrap().gaps, 0);
     assert_eq!(ing.health(Stream::AccessGate).last_error.as_deref(), Some("503 from fullnode"));
 }
 
 #[tokio::test]
 async fn a_pruned_message_without_a_stored_cursor_is_a_plain_failure() {
-    let (mut ing, _) = ingestor(Fake::new(Box::new(|_| Err("data has been pruned".into()))));
+    let db = require_db!();
+    let (mut ing, _) = ingestor(&db, Fake::new(Box::new(|_| Err("data has been pruned".into())))).await;
     ing.poll().await;
-    assert_eq!(ing.store().health(Stream::AccessGate).unwrap().gaps, 0);
+    assert_eq!(ing.store().health(Stream::AccessGate).await.unwrap().gaps, 0);
     assert_eq!(ing.health(Stream::AccessGate).last_error.as_deref(), Some("data has been pruned"));
 }
 
@@ -388,25 +411,26 @@ fn pruned_wording() {
 
 #[tokio::test]
 async fn a_restart_continues_from_the_persisted_heartbeat() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("indexer.db");
+    let db = require_db!();
     {
-        let store = Store::open(&path).unwrap();
+        let store = db.store().await;
         let mut ing =
-            Ingestor::new(store, Fake::new(paged(pages(vec![]))), IngestOptions::new(packages()), Box::new(|_| {}));
+            Ingestor::new(store, Fake::new(paged(pages(vec![]))), IngestOptions::new(packages()), Box::new(|_| {}))
+                .await;
         ing.poll().await;
     }
-    let before = Store::open(&path).unwrap().poll_state(Stream::AccessGate).unwrap().last_success_at;
+    let before = db.store().await.poll_state(Stream::AccessGate).await.unwrap().last_success_at;
     assert!(before > 0);
-    let store = Store::open(&path).unwrap();
+    let store = db.store().await;
     let mut ing = Ingestor::new(
         store,
         Fake::new(Box::new(|_| Err("down".into()))),
         IngestOptions::new(packages()),
         Box::new(|_| {}),
-    );
+    )
+    .await;
     ing.poll().await;
-    let after = ing.store().poll_state(Stream::AccessGate).unwrap();
+    let after = ing.store().poll_state(Stream::AccessGate).await.unwrap();
     assert_eq!((after.last_success_at, after.last_error.as_deref()), (before, Some("down")));
 }
 
@@ -637,6 +661,7 @@ mod stub {
 async fn the_grpc_source_reads_list_events_frames_and_the_chain_identifier() {
     use std::sync::{Arc, Mutex};
 
+    let db = require_db!();
     use crate::source::GrpcSource;
 
     let a = minted(&gate_a(), 7, 123);
@@ -681,15 +706,9 @@ async fn the_grpc_source_reads_list_events_frames_and_the_chain_identifier() {
     assert!(is_pruned(&err), "{err}");
 
     // End to end: the ingester stores what the gRPC source read.
-    let (ing, _) = ingestor_with(Fake::new(paged(pages(vec![]))), IngestOptions::new(packages()));
-    let store = ing.into_store();
-    let real = Ingestor::new(store, source, IngestOptions::new(packages()), Box::new(|_| {}));
-    let mut opts_pages = 0;
-    while opts_pages < 1 {
-        real.poll_stream(Stream::AccessGate).await.unwrap();
-        opts_pages += 1;
-    }
-    assert_eq!(real.store().coverage(Stream::AccessGate).unwrap().events, 2);
+    let mut real = Ingestor::new(db.store().await, source, IngestOptions::new(packages()), Box::new(|_| {})).await;
+    real.poll_stream(Stream::AccessGate).await.unwrap();
+    assert_eq!(real.store().coverage(Stream::AccessGate).await.unwrap().events, 2);
 }
 
 #[tokio::test]
@@ -704,48 +723,59 @@ async fn an_unreachable_node_is_an_error_not_a_hang() {
 
 // ── Startup wiring (main) ──────────────────────────────────────────────────
 
-fn cfg(dir: &std::path::Path) -> sui_indexer_store::config::IngestConfig {
-    let db = dir.join("indexer.db").to_str().unwrap().to_owned();
-    sui_indexer_store::config::IngestConfig::load(&move |k| match k {
-        "DB_PATH" => Some(db.clone()),
-        "ACCESS_GATE_ORIGINAL_ID" => Some(kit::ag()),
-        "SEAL_ORIGINAL_ID" => Some(kit::seal()),
-        _ => None,
-    })
-    .unwrap()
+fn cfg(db: &TestDb) -> sui_indexer_store::config::IngestConfig {
+    let env = db.env(&db.owner, &[("ACCESS_GATE_ORIGINAL_ID", &kit::ag()), ("SEAL_ORIGINAL_ID", &kit::seal())]);
+    sui_indexer_store::config::IngestConfig::load(&env).unwrap()
 }
 
 fn quiet() -> Logger {
     Box::new(|_| {})
 }
 
-fn backups(dir: &std::path::Path, prefix: &str) -> Vec<String> {
-    std::fs::read_dir(dir)
+/// The `bak_<ms>` schemas of the database (the backups a confirmed reindex makes).
+async fn backup_schemas(db: &TestDb) -> Vec<String> {
+    db.admin()
+        .await
+        .query("SELECT nspname::text FROM pg_namespace WHERE nspname LIKE 'bak\\_%' ORDER BY 1", &[])
+        .await
         .unwrap()
-        .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().into_owned()))
-        .filter(|n| n.starts_with(prefix) && !n.ends_with("-wal") && !n.ends_with("-shm"))
+        .iter()
+        .map(|r| r.get(0))
         .collect()
 }
 
 #[tokio::test]
 async fn start_refuses_a_node_of_another_chain() {
-    let dir = tempfile::tempdir().unwrap();
+    let db = require_db!();
     let mut fake = Fake::new(paged(pages(vec![])));
     fake.chain = Ok(MAINNET_GENESIS.into());
-    let err = start(&cfg(dir.path()), fake, quiet()).await.err().unwrap();
+    let err = start(&cfg(&db), fake, quiet()).await.err().unwrap();
     assert!(err.contains("serves chain 35834a8a, not testnet (4c78adac)"), "{err}");
     let mut fake = Fake::new(paged(pages(vec![])));
     fake.chain = Err("connection refused".into());
-    let err = start(&cfg(dir.path()), fake, quiet()).await.err().unwrap();
+    let err = start(&cfg(&db), fake, quiet()).await.err().unwrap();
     assert!(err.contains("cannot read the chain identifier"), "{err}");
 }
 
 #[tokio::test]
+async fn start_refuses_a_second_ingester_while_one_is_running() {
+    let db = require_db!();
+    let c = cfg(&db);
+    let first = start(&c, Fake::new(paged(pages(vec![]))), quiet()).await.unwrap();
+    // The second start fails fast on the writer lock (after its short grace) and never touches the data.
+    let started = std::time::Instant::now();
+    let err = start(&c, Fake::new(paged(pages(vec![]))), quiet()).await.err().unwrap();
+    assert!(err.contains("cannot start the writer") && err.contains("writer lock"), "{err}");
+    assert!(started.elapsed() < Duration::from_secs(15));
+    assert!(!first.store().is_closed());
+}
+
+#[tokio::test]
 async fn start_refuses_a_package_change_until_confirmed_then_backs_up_and_reindexes() {
-    let dir = tempfile::tempdir().unwrap();
-    let c = cfg(dir.path());
-    let ing = start(&c, Fake::new(paged(pages(vec![]))), quiet()).await.unwrap();
-    ing.store().ingest(Stream::AccessGate, &[minted(&gate_a(), 1, 1).indexed()], Some("c1")).unwrap();
+    let db = require_db!();
+    let c = cfg(&db);
+    let mut ing = start(&c, Fake::new(paged(pages(vec![]))), quiet()).await.unwrap();
+    ing.store_mut().ingest(Stream::AccessGate, &[minted(&gate_a(), 1, 1).indexed()], Some("c1")).await.unwrap();
     let generation = ing.store().generation().to_owned();
     drop(ing);
 
@@ -753,7 +783,7 @@ async fn start_refuses_a_package_change_until_confirmed_then_backs_up_and_reinde
     changed.access_gate_original_id = addr("0x77");
     let err = start(&changed, Fake::new(paged(pages(vec![]))), quiet()).await.err().unwrap();
     assert!(err.starts_with("refusing to start: ") && err.contains("REINDEX_CONFIRM=access-gate"), "{err}");
-    assert!(backups(dir.path(), "indexer.db.bak-1").is_empty() && backups(dir.path(), "indexer.db.bak-2").is_empty());
+    assert!(backup_schemas(&db).await.is_empty());
 
     changed.reindex_confirm = vec![Stream::AccessGate];
     let logs: Logs = Rc::default();
@@ -762,58 +792,60 @@ async fn start_refuses_a_package_change_until_confirmed_then_backs_up_and_reinde
         .await
         .unwrap();
     assert_ne!(ing.store().generation(), generation);
-    assert_eq!(ing.store().coverage(Stream::AccessGate).unwrap().events, 0);
-    let reindex_backups: Vec<_> =
-        backups(dir.path(), "indexer.db.bak-").into_iter().filter(|n| !n.contains("pre-rust")).collect();
-    assert_eq!(reindex_backups.len(), 1, "{reindex_backups:?}");
-    assert!(logs.borrow().iter().any(|l| l.contains("package changed for access-gate")));
+    assert_eq!(ing.store().coverage(Stream::AccessGate).await.unwrap().events, 0);
+    let backups = backup_schemas(&db).await;
+    assert_eq!(backups.len(), 1, "{backups:?}");
+    let copied: i64 =
+        ing.store().query(&format!("SELECT count(*) FROM {}.events", backups[0]), &[]).await.unwrap()[0].get(0);
+    assert_eq!(copied, 1);
+    assert!(logs.borrow().iter().any(|l| l.contains("package changed for access-gate") && l.contains(&backups[0])));
 }
 
 #[tokio::test]
-async fn start_backs_up_a_database_of_the_previous_indexer_once() {
-    let dir = tempfile::tempdir().unwrap();
-    let c = cfg(dir.path());
-    // The TypeScript indexer's database: same schema and rows, no schema_writer.
-    {
-        let mut s = Store::open(&c.db_path).unwrap();
-        s.bind_packages(&[(Stream::AccessGate, kit::ag()), (Stream::SealedContent, kit::seal())], &[], None).unwrap();
-        s.ingest(Stream::AccessGate, &[minted(&gate_a(), 1, 1).indexed()], Some("AQID")).unwrap();
-        s.connection().execute("DELETE FROM meta WHERE key = 'schema_writer'", []).unwrap();
-    }
-    let ing = start(&c, Fake::new(paged(pages(vec![]))), quiet()).await.unwrap();
-    assert_eq!(ing.store().cursor(Stream::AccessGate).unwrap().as_deref(), Some("AQID"));
-    drop(ing);
-    let pre = backups(dir.path(), "indexer.db.bak-pre-rust-");
-    assert_eq!(pre.len(), 1);
-    let copy = Store::open(dir.path().join(&pre[0])).unwrap();
-    assert_eq!(copy.coverage(Stream::AccessGate).unwrap().events, 1);
-    drop(copy);
-    drop(start(&c, Fake::new(paged(pages(vec![]))), quiet()).await.unwrap());
-    assert_eq!(backups(dir.path(), "indexer.db.bak-pre-rust-").len(), 1);
-}
-
-#[tokio::test(start_paused = true)]
 async fn the_loop_polls_every_interval_and_stops_on_shutdown() {
-    let dir = tempfile::tempdir().unwrap();
+    let db = require_db!();
     let p = pages(vec![(ag_filter(), vec![vec![raw(&minted(&gate_a(), 1, 1))]])]);
-    let mut ing = start(&cfg(dir.path()), Fake::new(paged(p)), quiet()).await.unwrap();
-    let shutdown = tokio::time::sleep(Duration::from_millis(35_000));
-    run_loop(&mut ing, Duration::from_millis(15_000), shutdown).await;
-    // Polls at 0, 15 s and 30 s; each poll reads both streams once (one page each).
-    assert_eq!(ing.source().calls.borrow().len(), 6);
-    assert_eq!(ing.store().coverage(Stream::AccessGate).unwrap().events, 1);
+    let mut ing = start(&cfg(&db), Fake::new(paged(p)), quiet()).await.unwrap();
+    // Real time (the database is real I/O): polls at 0, 150 ms, 300 ms ...; each poll reads both streams.
+    let shutdown = tokio::time::sleep(Duration::from_millis(500));
+    run_loop(&mut ing, Duration::from_millis(150), shutdown).await.unwrap();
+    let calls = ing.source().calls.borrow().len();
+    assert!((6..=10).contains(&calls), "{calls} requests in about four polls of two streams");
+    assert_eq!(ing.store().coverage(Stream::AccessGate).await.unwrap().events, 1);
 }
 
 #[tokio::test]
-async fn the_healthcheck_follows_the_liveness_heartbeat() {
-    let dir = tempfile::tempdir().unwrap();
-    let c = cfg(dir.path());
-    let path = std::path::PathBuf::from(&c.db_path);
-    assert!(healthcheck(&path, 15_000, 0).unwrap_err().contains("not ready"));
+async fn the_loop_stops_when_the_connection_carrying_the_writer_lock_is_lost() {
+    let db = require_db!();
+    let mut ing = start(&cfg(&db), Fake::new(paged(pages(vec![]))), quiet()).await.unwrap();
+    // The database kills the writer's session (a failover, an admin's pg_terminate_backend).
+    let admin = db.admin().await;
+    admin
+        .execute(
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'sui-indexer-ingest' AND datname = current_database()",
+            &[],
+        )
+        .await
+        .unwrap();
+    let outcome = run_loop(&mut ing, Duration::from_millis(50), std::future::pending()).await;
+    assert!(outcome.unwrap_err().contains("writer lock"), "the loop must end with an error, not retry");
+}
+
+#[tokio::test]
+async fn the_healthcheck_follows_the_liveness_heartbeat_and_the_database() {
+    let db = require_db!();
+    let c = cfg(&db);
+    // Nothing exists yet: unhealthy (no table), not a hang.
+    assert!(healthcheck(&c.database, 15_000, 0).await.is_err());
     let ing = start(&c, Fake::new(paged(pages(vec![]))), quiet()).await.unwrap();
-    let alive: i64 = ing.store().meta(ALIVE_KEY).unwrap().unwrap().parse().unwrap();
-    assert!(healthcheck(&path, 15_000, alive + 105_000).is_ok());
-    assert!(healthcheck(&path, 15_000, alive + 105_001).unwrap_err().contains("limit 105000 ms"));
-    ing.store().connection().execute("DELETE FROM meta WHERE key = ?", [ALIVE_KEY]).unwrap();
-    assert!(healthcheck(&path, 15_000, alive).unwrap_err().contains("no liveness heartbeat"));
+    let alive: i64 = ing.store().heartbeat(ALIVE_KEY).await.unwrap().unwrap().parse().unwrap();
+    assert!(healthcheck(&c.database, 15_000, alive + 105_000).await.is_ok());
+    assert!(healthcheck(&c.database, 15_000, alive + 105_001).await.unwrap_err().contains("limit 105000 ms"));
+    ing.store().execute_batch(&format!("DELETE FROM heartbeats WHERE key = '{ALIVE_KEY}'")).await.unwrap();
+    assert!(healthcheck(&c.database, 15_000, alive).await.unwrap_err().contains("no liveness heartbeat"));
+    // An unreachable database is unhealthy.
+    let dead =
+        DatabaseSettings::parse(&c.database.url_unredacted().replace(&format!(":{}/", c.database.port()), ":1/"), true)
+            .unwrap();
+    assert!(healthcheck(&dead, 15_000, alive).await.is_err());
 }

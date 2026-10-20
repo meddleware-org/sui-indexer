@@ -11,6 +11,9 @@ use serde_json::{Value, json};
 use sui_indexer_store::sui::normalize_sui_address;
 use sui_indexer_store::{IndexedEvent, Store, Stream};
 
+#[cfg(feature = "import-sqlite")]
+pub mod sqlite;
+
 pub fn addr(s: &str) -> String {
     normalize_sui_address(s)
 }
@@ -202,7 +205,7 @@ pub fn sealed(gate: &str, checkpoint: u64, label: &str) -> Fixture {
 
 /// The API tests' and the contract job's database: five `access_gate` events (gates A and B,
 /// checkpoints 1–5) and three sealed-content pointers (labels `one`, `other`, `two`).
-pub fn seed(store: &Store) {
+pub async fn seed(store: &mut Store) {
     let ag: Vec<IndexedEvent> = [
         minted(&gate_a(), 1, 2000),
         consumed(&gate_a(), 2),
@@ -213,11 +216,11 @@ pub fn seed(store: &Store) {
     .iter()
     .map(Fixture::indexed)
     .collect();
-    store.ingest(Stream::AccessGate, &ag, Some("Yw==")).expect("seed access-gate");
+    store.ingest(Stream::AccessGate, &ag, Some("Yw==")).await.expect("seed access-gate");
     let sc: Vec<IndexedEvent> =
         [sealed(&gate_a(), 6, "one"), sealed(&gate_b(), 7, "other"), sealed(&gate_a(), 8, "two")]
             .iter()
             .map(Fixture::indexed)
             .collect();
-    store.ingest(Stream::SealedContent, &sc, Some("cw==")).expect("seed sealed-content");
+    store.ingest(Stream::SealedContent, &sc, Some("cw==")).await.expect("seed sealed-content");
 }

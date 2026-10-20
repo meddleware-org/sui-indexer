@@ -1,6 +1,6 @@
 [package]
 name = "sui-indexer-store"
-description = "SQLite schema, writes and reads shared by the sui-indexer ingester and API."
+description = "PostgreSQL schema, migrations, writes and reads shared by the sui-indexer ingester and API."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,11 +12,28 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
-# SQLite compiled in (bundled): the same engine everywhere, no system library, no ORM.
-rusqlite = { version = "=0.40.2", features = ["bundled"] }
+# PostgreSQL client: tokio-postgres (no ORM), a deadpool pool for the API, TLS by rustls (the provider
+# the gRPC client already uses: ring), `verify-full` only.
+tokio-postgres = { version = "=0.7.18", default-features = false, features = ["runtime"] }
+deadpool-postgres = { version = "=0.14.2", default-features = false, features = ["rt_tokio_1"] }
+tokio-postgres-rustls = { version = "=0.14.0", default-features = false }
+rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
+tokio = { version = "=1.53.3", features = ["rt", "time", "sync", "macros"] }
+percent-encoding = "=2.3.2"
+sha2 = "=0.11.1"
+# The one-off SQLite importer (`ingest import-sqlite`): compiled only with `--features import-sqlite`
+# (the 0.0.14 image). 0.0.15 removes the feature and this dependency.
+rusqlite = { version = "=0.40.2", features = ["bundled"], optional = true }
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.154"
 getrandom = "=0.4.3"
 
+[features]
+import-sqlite = ["dep:rusqlite"]
+# The per-test database harness (`testdb`), for this crate's tests and the other crates' dev builds.
+# Adds no dependency; never enabled in a shipped build.
+testing = []
+
 [dev-dependencies]
 tempfile = "=3.27.0"
+tokio = { version = "=1.53.3", features = ["rt-multi-thread", "macros", "time", "sync"] }

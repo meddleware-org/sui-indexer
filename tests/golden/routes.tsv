@@ -1,0 +1,53 @@
+GET	/v1/testnet/coverage
+GET	/v1/testnet/access-gate/events
+GET	/v1/testnet/access-gate/events?limit=2
+GET	/v1/testnet/access-gate/events?before=e32e37afbbe9.8&limit=2
+GET	/v1/testnet/access-gate/events?before=e32e37afbbe9.4&limit=2
+GET	/v1/testnet/access-gate/events?before=e32e37afbbe9.2&limit=2
+GET	/v1/testnet/access-gate/events?before=e32e37afbbe9.1
+GET	/v1/testnet/access-gate/events?before=e32e37afbbe9.9999
+GET	/v1/testnet/access-gate/events?kinds=AccessMinted
+GET	/v1/testnet/access-gate/events?kinds=AccessConsumed
+GET	/v1/testnet/access-gate/events?kinds=AccessConsumed%2CAccessMinted
+GET	/v1/testnet/access-gate/events?kinds=AccessMinted%2CPlatformConfigUpdated&limit=3
+GET	/v1/testnet/access-gate/events?kinds=AccessBurned
+GET	/v1/testnet/access-gate/events?gate=0x000000000000000000000000000000000000000000000000000000000000000a
+GET	/v1/testnet/access-gate/events?gate=0x000000000000000000000000000000000000000000000000000000000000000b&limit=1
+GET	/v1/testnet/access-gate/events?gate=0x000000000000000000000000000000000000000000000000000000000000000a&kinds=AccessMinted
+GET	/v1/testnet/access-gate/events?gate=0x000000000000000000000000000000000000000000000000000000000000000a&kinds=AccessConsumed%2CAccessMinted&limit=2
+GET	/v1/testnet/access-gate/events?before=e32e37afbbe9.8&gate=0x000000000000000000000000000000000000000000000000000000000000000a&limit=1
+GET	/v1/testnet/access-gate/events?gate=0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+GET	/v1/testnet/sealed-content?gate=0x000000000000000000000000000000000000000000000000000000000000000a
+GET	/v1/testnet/sealed-content?gate=0x000000000000000000000000000000000000000000000000000000000000000b&limit=1
+GET	/v1/testnet/sealed-content?gate=0x000000000000000000000000000000000000000000000000000000000000000a&limit=1
+GET	/v1/testnet/sealed-content?before=e32e37afbbe9.9&gate=0x000000000000000000000000000000000000000000000000000000000000000a
+GET	/v1/testnet/gates/0x000000000000000000000000000000000000000000000000000000000000000a/stats
+GET	/v1/testnet/gates/0x000000000000000000000000000000000000000000000000000000000000000b/stats
+GET	/v1/testnet/gates/0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff/stats
+GET	/v1/testnet/access-gate/events	If-None-Match: "e32e37afbbe9-12"
+GET	/v1/testnet/access-gate/events	If-None-Match: W/"e32e37afbbe9-12"
+GET	/v1/testnet/access-gate/events	If-None-Match: "e32e37afbbe9-11"
+GET	/v1/testnet/access-gate/events?before=e32e37afbbe9.8&limit=2	If-None-Match: "e32e37afbbe9-b8"
+GET	/v1/testnet/access-gate/events?before=000000000000.5
+GET	/v1/testnet/access-gate/events?limit=0
+GET	/v1/testnet/access-gate/events?limit=101
+GET	/v1/testnet/access-gate/events?limit=abc
+GET	/v1/testnet/access-gate/events?gate=zz
+GET	/v1/testnet/access-gate/events?kinds=Nope
+GET	/v1/testnet/access-gate/events?kinds=
+GET	/v1/testnet/access-gate/events?before=garbage
+GET	/v1/testnet/access-gate/events?cachebuster=1
+GET	/v1/testnet/sealed-content
+GET	/v1/testnet/sealed-content?gate=0x000000000000000000000000000000000000000000000000000000000000000a&limit=201
+GET	/v1/testnet/coverage?x=1
+GET	/v1/mainnet/access-gate/events
+GET	/v1/testnet/nothing
+GET	/
+GET	/v1/testnet/access-gate/events?limit=05
+GET	/v1/testnet/access-gate/events?gate=0xA
+GET	/v1/testnet/access-gate/events?kinds=AccessMinted,AccessConsumed,AccessMinted
+GET	/v1/testnet/gates/0xA/stats
+GET	/readyz
+OPTIONS	/v1/testnet/coverage
+POST	/v1/testnet/coverage
+HEAD	/v1/testnet/coverage
