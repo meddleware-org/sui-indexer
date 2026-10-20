@@ -127,6 +127,10 @@ the index; the offsite copy is operator work and not configured). Totals for F1�
 crates only they pulled in, the importer and parity tests, the SQLite fixture builder, `tests/golden`, `migration/` and the legacy manifests are gone (evidence in F31).
 A41, A42 and A48 are N/A (the data moved and the importer no longer exists); the Section D rows for the 0.0.14 cutover and the 0.0.15 removal are ticked. Totals for F1–F32:
 17 RESOLVED, 2 MITIGATED (F2, F3), 3 ADJUDICATED, 1 ACCEPTED-RISK (F28), 1 DEFERRED (F19, a client change), 8 Positive (F12, F13, F14, F22, F27, F29, F30, F32).
+**2026-10-20 (clients, F19; no change in this repo):** F19 is RESOLVED in access-gate-client 0.0.10 and seal-client 0.0.21 (local commits, not yet released): a head page whose `polledAt` is
+missing, null or older than 60 s is treated as unavailable and the node fallback runs (evidence in F19). F2 follows to RESOLVED and the Section D row *clients treat a stale head page as
+unavailable* is ticked. Totals for F1–F32: 19 RESOLVED, 1 MITIGATED (F3), 3 ADJUDICATED, 1 ACCEPTED-RISK (F28), 0 DEFERRED, 8 Positive (F12, F13, F14, F22, F27, F29, F30, F32).
+The apps (treasury-ui, seal-ui) get the behaviour when they take the two client releases.
 
 **Front matter (RUST lens, from 0.0.12):**
 
@@ -308,11 +312,11 @@ cites the commit and the test that pins it.
 
 | Disposition | Findings |
 | --- | --- |
-| RESOLVED | F1 (full-stream scans), F25 (rare-kind `kinds` filters; `events_kind`, 0.0.13), F4 and F18 (SBOM of the bundled code: npm in 0.0.10, Cargo per binary in 0.0.12), F5 (licence notices), F6 (cache key and limiter), F9 (casts, ETags), F10 (CI and image pipeline), F11 (documentation drift; last residual fixed 2026-10-19), F15 (pruned-cursor wedge), F16 (chain-identity startup bug; the startup path is now tested), F17 (libssl advisories in the base image), F20 (operator-keyed lookups), F21 (`noUncheckedIndexedAccess`; TS-only, superseded), F23 (health across two processes, 0.0.12), F26 (connection cap, 0.0.12), F31 (the temporary SQLite import path; removed in 0.0.15) |
-| MITIGATED | F2 (stuck ingest; clients ignore `polledAt`, see F19), F3 (history loss on config change fixed; loss of the storage is now covered by the database tier's daily dump, the offsite copy is operator work and not configured) |
+| RESOLVED | F2 (stuck ingest; indexer side 0.0.5, clients' freshness check F19), F19 (clients treat a stale head page as unavailable; access-gate-client 0.0.10, seal-client 0.0.21), F1 (full-stream scans), F25 (rare-kind `kinds` filters; `events_kind`, 0.0.13), F4 and F18 (SBOM of the bundled code: npm in 0.0.10, Cargo per binary in 0.0.12), F5 (licence notices), F6 (cache key and limiter), F9 (casts, ETags), F10 (CI and image pipeline), F11 (documentation drift; last residual fixed 2026-10-19), F15 (pruned-cursor wedge), F16 (chain-identity startup bug; the startup path is now tested), F17 (libssl advisories in the base image), F20 (operator-keyed lookups), F21 (`noUncheckedIndexedAccess`; TS-only, superseded), F23 (health across two processes, 0.0.12), F26 (connection cap, 0.0.12), F31 (the temporary SQLite import path; removed in 0.0.15) |
+| MITIGATED | F3 (history loss on config change fixed; loss of the storage is now covered by the database tier's daily dump, the offsite copy is operator work and not configured) |
 | ADJUDICATED | F7 (new event types need a fresh publish), F8 (display-only trust in the node; chain identity now checked), F24 (stored columns from the node's JSON rendering; parity gate) |
 | ACCEPTED-RISK | F28 (shared fate with the auth PostgreSQL; D59, mitigations in the finding) |
-| DEFERRED | F19 (clients treat a stale head page as unavailable): pre-mainnet gate row in Section D; the change lives in access-gate-client and seal-client |
+| DEFERRED | none |
 | Positive | F12, F13, F14, F22 (the API cannot write — by role since 0.0.14), F27 (role separation), F29 (single writer by advisory lock), F30 (migration safety), F32 (TLS `verify-full`, no secret in logs) |
 
 **Posture:**
@@ -320,8 +324,8 @@ cites the commit and the test that pins it.
 - Small, careful code. The correctness invariants (ordering, atomicity, generations) are sound and
   tested.
 - The operating-at-scale items (query cost, stuck ingest, destructive rebinding) are fixed in code and
-  pinned by tests. What remains is the **platform side** (volume backup, F3) and the **client side of
-  freshness** (F19). SBOM completeness (F18) is fixed in the 0.0.10 release workflow.
+  pinned by tests. What remains is the **platform side** (volume backup, F3). The **client side of
+  freshness** (F19) is fixed in access-gate-client 0.0.10 and seal-client 0.0.21 (the apps take it with their next bump). SBOM completeness (F18) is fixed in the 0.0.10 release workflow.
 - The first pass recorded findings only; this pass records the dispositions of the fixes released
   2026-10-08/09 (see the re-verification log).
 - 2026-10-19: the Rust rewrite keeps every behaviour above and adds a process boundary — the API can no
@@ -346,7 +350,7 @@ cites the commit and the test that pins it.
 | Another tenant of the PostgreSQL tier | connections, load, the tier's availability | Starve or take down the index | per-role connection limits and timeouts; the API answers `503` and the clients fall back (F28, accepted) |
 | Operator / config (`NETWORK`, `GRPC_URL`, `*_ORIGINAL_ID`, `DATABASE_URL`) | what is indexed, where it is stored | A package-ID change clears a stream | Validated and normalised IDs; startup refuses until `REINDEX_CONFIRM` names the stream; `VACUUM INTO` backup first; generation rotation (F3). The backup sits on the same volume |
 | `access_gate` / `seal_policies` publisher | event types and layouts | Add event types in an upgrade | Exact-type parsers. Upgrade-defined types are not indexed: new event types need a fresh publish (F7, decision) |
-| Consumer apps | interpretation | Treat display data as truth | Display-only invariant; the clients decode again and fall back on errors. Head pages carry `polledAt`; the clients do not use it yet (F19) |
+| Consumer apps | interpretation | Treat display data as truth | Display-only invariant; the clients decode again and fall back on errors. Head pages carry `polledAt`; the clients treat a missing, null or older-than-60-s value as unavailable and fall back (F19, access-gate-client 0.0.10 / seal-client 0.0.21) |
 | Dependency and base-image authors | crates (0.0.12; bundled JS before); base layers | Ship vulnerable code | `Cargo.lock`; `cargo deny` (RustSec advisories, licences, bans, sources: crates.io only); digest pins; Trivy image scan before sign; `Cargo.lock` and licence notices in the image; a checked CycloneDX SBOM per binary (F18) |
 
 ### On-chain dependency matrix (SUI_CLIENT lens)
@@ -589,7 +593,7 @@ First-pass commands (2026-10-03, Node 22.22.2) are recorded in the re-verificati
 
 ### F2 — One undecodable event halts both streams forever; stale pages give no signal
 
-**Severity:** Low   **Disposition:** MITIGATED (indexer side RESOLVED in 0.0.5, `1973fca`; the clients' use of `polledAt` is F19; monitoring done 2026-10-09)
+**Severity:** Low   **Disposition:** RESOLVED (indexer side in 0.0.5, `1973fca`; monitoring done 2026-10-09; the clients' use of `polledAt` is F19, RESOLVED 2026-10-20 in access-gate-client 0.0.10 and seal-client 0.0.21)
 **Where:**
 
 - `src/ingest.ts:98-105`: `toIndexed` throws for a recognised event whose BCS does not decode, which
@@ -652,14 +656,16 @@ First-pass commands (2026-10-03, Node 22.22.2) are recorded in the re-verificati
 - **Monitoring.** The status page's "Chain Access → Chain index" check polls the in-cluster `/healthz`
   and expects `"ok":true` (done 2026-10-09, `OPERATOR_TASKS.md`; the check was failure-tested). The
   external monitor that the first pass found missing exists.
-- **Remaining.** The access-gate-client and seal-client do not read `polledAt` or `latestCheckpoint` (grep
-  of `src/` at 0.0.8 / 0.0.19), so a stale but healthy-looking head page is not treated as
-  unavailable by the apps. Tracked as F19. A stuck ingest is now visible on the status page and in
-  `/healthz`, but the apps still show the stale history until the indexer recovers.
+- **Was remaining (closed 2026-10-20).** The access-gate-client and seal-client did not read `polledAt` (grep
+  of `src/` at 0.0.8 / 0.0.19), so a stale but healthy-looking head page was not treated as
+  unavailable by the apps. Fixed in F19: both clients now fall back to the full node when a head page's
+  `polledAt` is missing, null or older than 60 s.
 
 **Re-verified 2026-10-19 (0.0.12, Rust):** Independent streams (`Ingestor::poll_one` per stream), count-and-skip (`stream_stats.undecodable`, `UNDECODABLE` log line) and the freshness fields are ported. What counts as undecodable changed with the decoding (F24): a recognised event whose JSON rendering lacks a valid `gate_id`/`commission_mist`, or that has no BCS, digest or index. Tests: *skips_and_counts_an_undecodable_event_…*, *a_recognised_event_without_what_the_row_needs_is_undecodable*, *polls_the_streams_independently_…*. `/healthz` now reads the per-stream heartbeat rows the ingester writes (F23). Disposition unchanged (MITIGATED; F19 open).
 
-**Re-verified 2026-10-20 (0.0.14):** The heartbeats are rows of a new `heartbeats` table (`poll:<stream>`, `ingest:alive`; they were `meta` rows, moved because they are rewritten many times a minute: `fillfactor 50`, so updates stay heap-only), written by the ingester after each poll and read by `/healthz` in one statement (`Reader::polls`); the JSON and the 5 × `POLL_MS` rule are unchanged. New: with PostgreSQL unreachable, `/healthz` is `503` with every stream `ok: false` and `lastError: "database unavailable"` (the cause is logged, not sent). Tests: *polls_the_streams_independently_and_health_names_the_failing_one*, *heartbeats_round_trip*, *a_database_that_cannot_be_reached_is_503_database_unavailable_and_recovers*. Disposition unchanged (MITIGATED; the clients' use of `polledAt` is F19).
+**Re-verified 2026-10-20 (0.0.14):** The heartbeats are rows of a new `heartbeats` table (`poll:<stream>`, `ingest:alive`; they were `meta` rows, moved because they are rewritten many times a minute: `fillfactor 50`, so updates stay heap-only), written by the ingester after each poll and read by `/healthz` in one statement (`Reader::polls`); the JSON and the 5 × `POLL_MS` rule are unchanged. New: with PostgreSQL unreachable, `/healthz` is `503` with every stream `ok: false` and `lastError: "database unavailable"` (the cause is logged, not sent). Tests: *polls_the_streams_independently_and_health_names_the_failing_one*, *heartbeats_round_trip*, *a_database_that_cannot_be_reached_is_503_database_unavailable_and_recovers*. Disposition unchanged at the time (MITIGATED; the clients' use of `polledAt` was F19).
+
+**Re-verified 2026-10-20 (clients):** F19 is RESOLVED (access-gate-client 0.0.10, seal-client 0.0.21; local commits, not yet released), which was the one remaining item: a stuck ingest that still answers `200` is now detected by the clients through `polledAt` and the full node answers. Disposition moved to RESOLVED. Nothing in this repository changed; the API contract that the clients rely on (head pages only, `polledAt` an epoch-ms integer or `null` before the first poll) is pinned by *head pages say how fresh the index is; older pages stay immutable and free of it* and the `polledAt` is-null-before-any-poll assertion in `crates/api/src/tests.rs`.
 
 ### F3 — Clearing a stream permanently loses history the full node has pruned
 
@@ -1291,7 +1297,7 @@ build time; the Trivy image scan may read the shipped lockfile (not verified).
 
 ### F19 — The clients do not use the freshness fields the indexer now serves
 
-**Severity:** Low   **Disposition:** DEFERRED (pre-mainnet gate: *clients treat a stale head page as unavailable*, Section D)
+**Severity:** Low   **Disposition:** RESOLVED (2026-10-20: access-gate-client 0.0.10 and seal-client 0.0.21, commits pending; released and consumed when the maintainer tags and the apps bump; Section D row ticked)
 **Where:** `access-gate-client/src/events.ts` and `seal-client/src/sealed-content.ts` (indexer readers);
 `src/api.ts` `eventsPage` (`polledAt`, `latestCheckpoint`).
 
@@ -1309,12 +1315,33 @@ outage visible to the operator, not to the apps. No funds or access are affected
 treat a head page whose `polledAt` is older than N poll intervals as unavailable and fall back to the node;
 add a test per client. Deferred to the pre-mainnet gate; not a testnet blocker.
 
+**Remediation / evidence (2026-10-20, access-gate-client 0.0.10 `readIndexerEvents`, inherited by seal-client 0.0.21; commits pending):**
+
+- Rule: a **head page** (no `before`) is unavailable unless its `polledAt` is a positive safe integer (epoch ms) that is no
+  older than `STALE_AFTER_MS` = 60 000 ms (4 poll intervals of 15 s) by the client's `Date.now()`. A missing, `null`
+  (no poll yet), mistyped or old value makes `readIndexerEvents` throw `indexer is stale…`, and the existing first-page
+  fallback in `listAccessGateEvents` / `listSealedContent` runs exactly as for a network failure (the full node answers, `indexerError`
+  says why). Older pages (with `before`) are immutable history and are never checked. Every other check is unchanged
+  (https only, `redirect: 'error'`, the 1 MiB cap, field validation).
+- Clock skew: the comparison uses the client's clock, not the server's. A `polledAt` up to `CLOCK_SKEW_TOLERANCE_MS` =
+  300 000 ms (5 min) in the future counts as fresh, so a client clock that runs behind does not hide a healthy indexer;
+  further ahead is unavailable. A client clock more than 60 s ahead makes every head page look stale (the node answers;
+  safe, the indexer is simply unused). `IndexerSource.staleAfterMs` overrides the limit per call.
+- Tests, per client: access-gate-client `tests/events.test.ts` *a stale head page counts as unavailable (sui-indexer F19)* (fresh used; exactly 60 s used and
+  60 s + 1 ms falls back with the `listEvents` spy proving the RPC fallback; null and missing `polledAt` fall back; non-number values fall back; future +60 s and +5 min used and
+  +5 min + 1 ms falls back; an older page ignores staleness; override; `readIndexerEvents` throws on stale) and seal-client `tests/sealed-content.test.ts` *a stale head page counts as
+  unavailable (sui-indexer F19, inherited from access-gate-client)* (the same cases through `listSealedContent`). Findings: access-gate-client audit F25, seal-client audit F26.
+- Rollout: the apps that pass `indexer` (treasury-ui, seal-ui) take the behaviour when they bump to access-gate-client `^0.0.10` / seal-client `^0.0.21`.
+  The API serves `polledAt` on head pages only and `null` before the first poll (`crates/api/src/tests.rs`), which is what the clients' rule assumes.
+
 **Note (2026-10-18):** the change lives only in access-gate-client and seal-client (`readIndexerEvents`);
 this repo already serves `polledAt` and `latestCheckpoint` and its contract tests pin them. Nothing to change
-here, so the finding stays DEFERRED on those two repos. The two clients' choice of N (a multiple of the poll
+here, so the finding stayed DEFERRED on those two repos. The two clients' choice of N (a multiple of the poll
 interval, 15 s by default) is theirs to make; recommendation: 4 intervals (60 s).
 
 **Re-verified 2026-10-19 (0.0.12, Rust):** Unchanged: the API still serves `polledAt` and `latestCheckpoint` (now from the heartbeat rows, F23), and the client change remains in access-gate-client and seal-client. Disposition unchanged (DEFERRED).
+
+**Re-verified 2026-10-20 (clients):** RESOLVED; see the remediation above. N chosen as recommended: 4 intervals (60 s). Nothing changes in this repository.
 
 ### F20 — Operator-keyed lookups use plain objects (found by the TS lens *Caller-keyed lookups* check)
 
@@ -1707,7 +1734,7 @@ are rewritten; A44–A50 are new.
 
 | # | Invariant | Enforced at | Proven by | Status |
 | --- | --- | --- | --- | --- |
-| A1 | Display-only; rows verbatim; clients decode again and fall back | design; `serialize` | client-contract tests | HOLDS (clients do not yet use `polledAt` — F19) |
+| A1 | Display-only; rows verbatim; clients decode again and fall back | design; `serialize` | client-contract tests | HOLDS (the clients treat a stale head page as unavailable — F19, 0.0.10 / 0.0.21) |
 | A2 | One parser (the client packages); the indexer never decodes BCS | `crates/ingest/src/decode.rs` (type name + node JSON, BCS stored verbatim) | ingest tests; client-contract job; parity 19/19 (F24) | HOLDS (upgrade-defined types need a fresh publish — F7, decision) |
 | A3 | Ledger order = row id; pages bounded by `before` immutable | `events.id` identity written by the one connection holding the writer lock (`writer.rs`, A45); ascending reads (`ingestor.rs`) | *ids_are_ordered_not_gapless_and_nothing_depends_on_contiguity*; ingest tests | HOLDS (ordered, not gapless: A49) |
 | A4 | Page + cursor + counters atomic | `Store::ingest` (one `Transaction`) | *ids_are_ordered_…* (a failed page leaves the cursor); store tests | HOLDS |
@@ -2028,8 +2055,8 @@ Every test project that exists runs in CI. Up to 0.0.11: one vitest project (52 
 
 - [x] per-request cost independent of history size — F1 (0.0.5, `1973fca`)
 - [x] ingest survives an undecodable event; streams independent; staleness visible on `/healthz` and the
-  status page — F2 (0.0.5; status check 2026-10-09). The apps do not yet read `polledAt`: F19, a
-  pre-mainnet row below
+  status page — F2 (0.0.5; status check 2026-10-09). The clients read `polledAt` since access-gate-client
+  0.0.10 / seal-client 0.0.21 (F19, the pre-mainnet row below)
 - [x] no irreversible clear without confirmation; backup before a clear — F3 (0.0.5). Volume backups are
   not set: accepted for testnet (display-only; the apps fall back to the node for its recent window), and a
   maintainer item recorded in F3
@@ -2065,7 +2092,9 @@ Every test project that exists runs in CI. Up to 0.0.11: one vitest project (52 
 - [x] SBOM includes the bundled dependencies (IMG-M8) — F18 (0.0.10, commit `4aab344`): second SPDX
   attestation from `npm sbom --omit dev`, checked by `scripts/check-sbom.mjs` and `tests/sbom.test.ts`;
   confirmed on the released 0.0.10 digest, 2026-10-18: two SPDX attestations (image SBOM, 17 packages; npm packages SBOM, 24 packages) verified with `cosign verify-attestation --type spdxjson`
-- [ ] clients treat a stale head page as unavailable — F19; coordinated client change, gated on mainnet
+- [x] clients treat a stale head page as unavailable — F19 (2026-10-20): `readIndexerEvents` in access-gate-client 0.0.10 (shared by seal-client 0.0.21)
+  throws for a head page whose `polledAt` is missing, null or older than 60 s, so the node fallback runs; the future is tolerated up to 5 min; older pages are not
+  checked; per-client tests named in F19. Local commits; released with the maintainer's tags, and the apps take it with their next bump
 - [ ] a mainnet deployment recorded in both clients (startup otherwise throws by design); then
   `NETWORK=mainnet` with the recorded chain id `35834a8a` — mainnet-blocked (access-gate-sui and
   seal-policies-sui publication, `OPERATOR_TASKS.md` "Mainnet release custody")
@@ -2097,9 +2126,9 @@ Every test project that exists runs in CI. Up to 0.0.11: one vitest project (52 
 - **The display-only contract needs a freshness half.**
   - Apps fall back on *errors*, but a stuck indexer (F2) or a slow one (F1) answers `200`.
   - The indexer half is done: head pages carry `polledAt` and `latestCheckpoint`, `/healthz` is per stream
-    and the status page checks it (F2). The client half is open: access-gate-client
-    (`listAccessGateEvents` indexer source) and seal-client (`listSealedContent`) do not read it (F19,
-    pre-mainnet).
+    and the status page checks it (F2). The client half is done (2026-10-20): access-gate-client
+    (`listAccessGateEvents` indexer source) and seal-client (`listSealedContent`) treat a head page with a missing, null or older-than-60-s `polledAt` as unavailable
+    and fall back to the full node (F19).
 - **Shared storage tier (D59/D60).** The indexer is the tier's second consumer after the Ory stack and the template for the next: own database, an owner and a
   SELECT-only role, `verify-full` TLS, the CA as a ConfigMap, per-pod NetworkPolicy by label, the tier's dump as the backup. The same checklist (tier README "Onboarding")
   applies to every service that follows; the shared-fate risk (F28) is the tier's, not each consumer's.
@@ -2129,7 +2158,7 @@ Every test project that exists runs in CI. Up to 0.0.11: one vitest project (52 
 
 1. MUST keep per-request cost independent of the number of indexed events — **holds** (F1).
 2. MUST keep ingesting both streams when one event cannot be decoded, and MUST expose staleness —
-   **holds** at the indexer (F2, F15); the clients do not yet act on it (F19).
+   **holds** at the indexer (F2, F15) and in the clients, which fall back on a stale head page (F19, 2026-10-20).
 3. MUST NOT irreversibly delete indexed history on a configuration change without explicit
    confirmation or an archive — **holds** (F3: confirmation plus a `bak_<ms>` schema copy made in the same transaction; loss of the
    storage is covered by the database tier's dump, whose offsite copy is not configured).
@@ -2205,7 +2234,7 @@ Every test project that exists runs in CI. Up to 0.0.11: one vitest project (52 
 - **S1** SHOULD keep per-stream stats (`fromCheckpoint`, `latestCheckpoint`, counts, per-gate
   counters, commission) in tables updated by `ingest()` (F1) — done in 0.0.5.
 - **S2** SHOULD add `polledAt` and `latestCheckpoint` to every head page — done in 0.0.5. The clients
-  SHOULD fall back when it is older than N poll intervals (F19, open).
+  SHOULD fall back when it is older than N poll intervals (F19) — done 2026-10-20, N = 4 (60 s).
 - **S3** SHOULD make the undecodable path explicit and visible in `/coverage` (F2) — done (count and
   skip, OQ2).
 - **S4** MAY add an `/v1/{network}/export` (or an offline `VACUUM INTO` CronJob) so pruned history
@@ -2258,8 +2287,8 @@ The four first-pass questions and OQ5-OQ7 are decided (OQ6 was superseded by OQ7
 
 ## Risks
 
-- **Silent staleness:** the indexer side is now visible (`/healthz`, the status page) but the apps still
-  show frozen history until the indexer recovers (F2, F19).
+- **Silent staleness:** visible at the indexer (`/healthz`, the status page) and handled in the clients (a head page older than 60 s falls back to the node;
+  F2, F19). It reaches an app only once the app bumps to access-gate-client 0.0.10 / seal-client 0.0.21; a client clock more than 60 s ahead disables the indexer for that client.
 - **Irreversible history loss:** volume loss with the node's retention at about 5½ days; the backup sits on
   the same volume (F3).
 - **Growth:** fixed in code (counters, canonical URLs); the Cloudflare zone rate rule is not set (F1,
@@ -2279,6 +2308,12 @@ The four first-pass questions and OQ5-OQ7 are decided (OQ6 was superseded by OQ7
 
 ## Re-verification log
 
+- 2026-10-20 — F19 closed in the clients (access-gate-client 0.0.10, seal-client 0.0.21; local commits, commit pending; nothing in this repository changed, no version bump).
+  - **Scope:** the freshness fields the API serves (`crates/api/src/handler.rs` `EventsPage`, `crates/api/src/tests.rs` head-page assertions) and the two clients' indexer reader.
+  - **Re-verified:** F19 → RESOLVED (evidence in the finding); F2 → RESOLVED (its last open item was F19); Section D row *clients treat a stale head page as unavailable* ticked; Section A row A1 caveat removed; the consumer-app row of the trust table, the cross-project theme, normative requirement 2, suggestion S2 and the risks list updated.
+  - **Found:** nothing new in this repository.
+  - **Totals F1-F32:** 19 RESOLVED, 1 MITIGATED (F3), 3 ADJUDICATED, 1 ACCEPTED-RISK (F28), 0 DEFERRED, 8 Positive (F12, F13, F14, F22, F27, F29, F30, F32).
+  - **Not run:** the Rust suites (no code changed here); the apps' bumps (consumers still resolve access-gate-client 0.0.9 / seal-client 0.0.20 until the clients are released).
 - 2026-10-20 — `0.0.15`: the one-off SQLite importer and `rusqlite` removed (local commit on top of `eb8e46a`; not released). No behaviour change for the API.
   - **Scope:** every file named in the Scope block; the repository was searched for `sqlite|import-sqlite|rusqlite|indexer.db|DB_PATH|VACUUM|WAL` and the workspace for `sqlite|indexer.db|import-sqlite|sui-indexer-data`.
   - **Re-verified:** F31 → RESOLVED (evidence in the finding); F18 (SBOM gate: no feature option, 116 / 175 crates, 11 cases) and F14 (Dockerfile in one build step) carry a note; F29 and F30 lose the importer wording; A16, A37 reworded; A41, A42, A48 N/A; B.1 loses the `rusqlite` row;
@@ -2435,3 +2470,4 @@ The four first-pass questions and OQ5-OQ7 are decided (OQ6 was superseded by OQ7
 - [x] 2026-10-20 (release workflow, D61): B.2 rows and the IMG supply-chain table updated; re-verification log entry added; no finding counts change.
 - [x] 2026-10-20 (0.0.15): finding header ↔ body: F31 RESOLVED in the header, the table and the body; Section A rows A41, A42, A48 N/A; Section D ↔ dispositions: the 0.0.14 cutover and the importer-removal rows ticked with evidence, no new unticked row; counts in the Status, the Executive summary and the findings table agree (17 / 2 / 3 / 1 / 1 / 8 for F1-F32).
 - [x] 2026-10-20 (0.0.15): C.1 counts measured (144 Rust tests, 11 SBOM-gate cases); re-verification log entry added.
+- [x] 2026-10-20 (F19, clients): finding header ↔ body: F2 and F19 RESOLVED in the header, the table and the body; Section D ↔ dispositions: the stale-head-page row ticked with evidence; the Status block, the Executive summary posture and the findings table agree (19 / 1 / 3 / 1 / 0 / 8 for F1-F32); re-verification log entry added.

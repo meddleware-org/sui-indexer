@@ -66,6 +66,8 @@ All routes are `GET` (and `HEAD`), and responses are JSON with `Access-Control-A
   values; only the order of parameters is left as sent (a bounded number of permutations).
 - **Freshness.** Head pages carry `polledAt` (epoch ms of the stream's last successful poll) and
   `latestCheckpoint`. Older pages are immutable and carry neither.
+  The client packages (access-gate-client 0.0.10, seal-client 0.0.21) treat a head page whose `polledAt` is missing,
+  `null` or older than 60 s as unavailable and read the full node instead.
 - **Transport.** 5 s to receive the request headers, 10 s per request, at most 1024 open connections and
   a 32 KiB request head; `OPTIONS` preflight answered, other methods `405`.
 
