@@ -1648,7 +1648,7 @@ outage is the index's outage. Revisit with the CloudNativePG step (the tier READ
 
 ### F31 — The SQLite import path (temporary, 0.0.14 only)
 
-**Severity:** Low   **Disposition:** RESOLVED (0.0.15, 2026-10-20: the importer, its feature, `rusqlite` and the cutover tooling are removed; the import it served was verified before it committed and is reported done by the maintainer; commit pending)
+**Severity:** Low   **Disposition:** RESOLVED (0.0.15, 2026-10-20: the importer, its feature, `rusqlite` and the cutover tooling are removed; the import it served was verified before it committed and is reported done by the maintainer; commit 333fe69)
 **Where (before 0.0.15):** `crates/store/src/import.rs`, `crates/ingest/src/import_cmd.rs` (feature `import-sqlite`), `crates/testkit/src/sqlite.rs`, `post-bootstrap/sui-indexer/migration/`.
 
 **Risk (0.0.14):** a one-off tool that reads a live database file and writes the index is a place for silent data loss (a wrong import looks like a healthy empty
@@ -2058,7 +2058,7 @@ Every test project that exists runs in CI. Up to 0.0.11: one vitest project (52 
 - [x] **0.0.14 (PostgreSQL) released and cut over** — D59/D60, F27–F32. Evidence: `config/images.yaml` pins the 0.0.14 digest `sha256:ed5f66b2…0566`; the maintainer reports (2026-10-20) that the cutover is done and settled and that the legacy SQLite
   Deployment, the import Job, the old PVC, the legacy NetworkPolicies and the server backup of the old volume are deleted. Not re-observed by this review (no cluster access); the per-step checks of the former runbook (import report, pre-cutover cursor, `/healthz`,
   consuming apps, status page) are therefore the maintainer's, not recorded here.
-- [x] **the SQLite importer removed (0.0.15)** — F31: the `import-sqlite` feature, `rusqlite`, the importer, the fixture builder, `tests/golden` and `migration/` are deleted (Executive summary, F31; commit pending); the 0.0.15 image is built and pinned by the maintainer's release (tag, `refresh-digests.sh`, `sync-manifests.sh`), which `OPERATOR_TASKS.md` tracks as "sui-indexer 0.0.15 release"
+- [x] **the SQLite importer removed (0.0.15)** — F31: the `import-sqlite` feature, `rusqlite`, the importer, the fixture builder, `tests/golden` and `migration/` are deleted (Executive summary, F31; commit 333fe69); the 0.0.15 image is built and pinned by the maintainer's release (tag, `refresh-digests.sh`, `sync-manifests.sh`), which `OPERATOR_TASKS.md` tracks as "sui-indexer 0.0.15 release"
 
 ### pre-mainnet
 
