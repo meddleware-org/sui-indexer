@@ -8,6 +8,10 @@
 # reachable from those packages through normal (not dev, not build) dependency edges for the release
 # targets, read from `cargo metadata --locked` (CARGO_METADATA=<file> to use a saved copy). An SBOM
 # that misses one, lists it at another version, or lists nothing stops the release.
+#
+# CARGO_FEATURES=<features> resolves the graph with the feature set the described binary was built with
+# (`--features`, package-qualified: `sui-indexer-ingest/import-sqlite` for the 0.0.14 ingester, which links
+# SQLite for the one-off importer; the API is built without it, so its SBOM is checked without it).
 set -euo pipefail
 
 sbom="${1:?usage: check-sbom.sh <sbom.json> <package> [<package> ...]}"
@@ -18,7 +22,8 @@ roots="$(printf '%s\n' "$@" | jq -R . | jq -sc .)"
 if [ -n "${CARGO_METADATA:-}" ]; then
   metadata="$(cat "$CARGO_METADATA")"
 else
-  metadata="$(cargo metadata --locked --format-version 1 --filter-platform x86_64-unknown-linux-gnu)"
+  # shellcheck disable=SC2086  # CARGO_FEATURES is a single comma-separated word
+  metadata="$(cargo metadata --locked --format-version 1 --filter-platform x86_64-unknown-linux-gnu ${CARGO_FEATURES:+--features $CARGO_FEATURES})"
 fi
 
 # Crates reachable from the roots through normal edges (dep_kinds with kind null), as name@version.

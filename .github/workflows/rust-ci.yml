@@ -2,7 +2,13 @@ name: Rust CI
 
 # fmt, clippy, tests, coverage, cargo-deny, the SBOM gate, MSRV, the client contract (the published TS
 # client packages against the built `api` binary: test tooling only, nothing of it ships), and the
-# image (configuration scan, licence notices, build, vulnerability scan, two-binary smoke test).
+# image (configuration scan, licence notices, build, vulnerability scan, two-container smoke test).
+#
+# The tests run against a real PostgreSQL 18 with TLS (scripts/test-postgres.sh: the same image, pinned by
+# digest, the database tier runs; a throwaway CA, `sslmode=verify-full`). It is started by a script rather
+# than as a `services:` container because the tests need TLS, which a service container cannot be given
+# flags for. REQUIRE_TEST_DATABASE=1 turns a missing server into a failure, so no database test can be
+# skipped silently; the test steps also fail on any ignored test.
 
 on:
   push:
@@ -33,11 +39,24 @@ jobs:
       - name: Format check
         run: cargo fmt --check
 
-      - name: Clippy
-        run: cargo clippy --all-targets --locked -- -D warnings
+      - name: Clippy (default features, and the temporary importer)
+        run: |
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+          cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 
+      - name: Start PostgreSQL (TLS)
+        run: bash scripts/test-postgres.sh start
+
+      # Default build, then the temporary `import-sqlite` build (the SQLite importer and the check that the
+      # imported index answers like the 0.0.13 API). Nothing may be ignored or skipped.
       - name: Test
-        run: cargo test --locked
+        run: |
+          set -o pipefail
+          cargo test --workspace --locked 2>&1 | tee test.log
+          cargo test --workspace --locked --all-features 2>&1 | tee -a test.log
+          if grep -E '[1-9][0-9]* ignored' test.log; then echo "::error::a test was ignored"; exit 1; fi
+          if grep -E 'SKIPPED' test.log; then echo "::error::a database test was skipped"; exit 1; fi
+          echo "tests run: $(grep -E '^test result' test.log | sed -E 's/.* ([0-9]+) passed.*/\1/' | paste -sd+ | bc)"
 
       # Coverage figure (RUST lens): printed to the job summary; informational, not a gate.
       - name: Install cargo-llvm-cov and cargo-cyclonedx
@@ -47,22 +66,29 @@ jobs:
 
       - name: Coverage
         run: |
-          cargo llvm-cov --locked --summary-only | tee coverage.txt
+          cargo llvm-cov --workspace --locked --all-features --summary-only | tee coverage.txt
           { echo '### Line coverage'; echo '```'; tail -n 3 coverage.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
       # Advisories, licences, bans and sources per deny.toml (the same RustSec database as `cargo audit`).
       - name: cargo deny
         uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
 
-      # The release attests a CycloneDX SBOM per binary; this is the gate it must pass there too.
+      # The release attests a CycloneDX SBOM per binary; this is the gate it must pass there too. The ingester is
+      # described with the feature set of the 0.0.14 image (the temporary SQLite importer); the API without.
       - name: SBOM gate (tests, then the real SBOMs)
         run: |
           bash scripts/tests/check-sbom-test.sh
-          for bin in api ingest; do
-            cargo cyclonedx --manifest-path "crates/${bin}/Cargo.toml" --format json --spec-version 1.5 \
-              --no-build-deps --target x86_64-unknown-linux-gnu -q
-            bash scripts/check-sbom.sh "crates/${bin}/sui-indexer-${bin}.cdx.json" "sui-indexer-${bin}"
-          done
+          cargo cyclonedx --manifest-path crates/api/Cargo.toml --format json --spec-version 1.5 \
+            --no-build-deps --target x86_64-unknown-linux-gnu -q
+          bash scripts/check-sbom.sh crates/api/sui-indexer-api.cdx.json sui-indexer-api
+          cargo cyclonedx --manifest-path crates/ingest/Cargo.toml --format json --spec-version 1.5 \
+            --no-build-deps --target x86_64-unknown-linux-gnu --features import-sqlite -q
+          CARGO_FEATURES=sui-indexer-ingest/import-sqlite bash scripts/check-sbom.sh \
+            crates/ingest/sui-indexer-ingest.cdx.json sui-indexer-ingest
+
+      - name: Stop PostgreSQL
+        if: always()
+        run: bash scripts/test-postgres.sh stop
 
   msrv:
     name: MSRV (rust-version in Cargo.toml)
@@ -72,7 +98,18 @@ jobs:
       - name: Install the declared minimum toolchain
         run: rustup toolchain install 1.88 --profile minimal --no-self-update && rustup default 1.88
       - name: Check on the declared minimum toolchain
-        run: cargo check --locked --workspace --all-targets
+        run: cargo check --locked --workspace --all-targets --all-features
+
+      # The dependency graph's floor matters at run time too: the tests run on it, against PostgreSQL.
+      - name: Start PostgreSQL (TLS)
+        run: bash scripts/test-postgres.sh start
+
+      - name: Test on the declared minimum toolchain
+        run: cargo test --locked --workspace --all-features
+
+      - name: Stop PostgreSQL
+        if: always()
+        run: bash scripts/test-postgres.sh stop
 
   contract:
     name: Client contract (published clients against the api binary)
@@ -90,6 +127,11 @@ jobs:
       - name: Build the api binary and the fixture seeder
         run: cargo build --release --locked -p sui-indexer-api -p sui-indexer-testkit
 
+      # A throwaway database per run, provisioned with the two production roles by `seed-fixture seed`; the api
+      # runs as the SELECT-only role.
+      - name: Start PostgreSQL (TLS)
+        run: bash scripts/test-postgres.sh start
+
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '26'
@@ -102,6 +144,10 @@ jobs:
         run: |
           npm ci --ignore-scripts --no-audit --no-fund
           npm test
+
+      - name: Stop PostgreSQL
+        if: always()
+        run: bash scripts/test-postgres.sh stop
 
   image:
     name: Image (configuration scan, licence notices, build, scan, smoke test)
@@ -141,5 +187,7 @@ jobs:
           ignore-unfixed: true
           version: v0.74.0
 
-      - name: Smoke test (both binaries, read-only API mount)
+      # Starts its own PostgreSQL (scripts/test-postgres.sh), provisions the two roles, and runs the ingester and
+      # the API as separate containers (read-only root, no capabilities).
+      - name: Smoke test (both binaries against PostgreSQL)
         run: bash scripts/smoke.sh sui-indexer:ci

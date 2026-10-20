@@ -75,4 +75,21 @@ expect 0 "several roots: the union of their graphs" "$(cdx a@1.0.0 d@4.0.0 other
 expect 1 "several roots: a crate of the second root missing" "$(cdx a@1.0.0 d@4.0.0 other@0.0.12)" app other
 expect 1 "an unknown root package" "$(cdx a@1.0.0 d@4.0.0)" nope
 expect 1 "not an SBOM" '{"hello": 1}' app
+
+# CARGO_FEATURES reaches `cargo metadata` as --features (and is absent otherwise): a stub cargo records its arguments.
+mkdir -p "$tmp/bin"
+cat > "$tmp/bin/cargo" <<'STUB'
+#!/usr/bin/env bash
+echo "$*" > "$STUB_ARGS"
+cat "$STUB_METADATA"
+STUB
+chmod +x "$tmp/bin/cargo"
+unset CARGO_METADATA
+export STUB_METADATA="$tmp/metadata.json" STUB_ARGS="$tmp/args"
+echo "$(cdx a@1.0.0 d@4.0.0)" > "$tmp/sbom.json"
+PATH="$tmp/bin:$PATH" bash "$check" "$tmp/sbom.json" app > /dev/null
+grep -q -- '--filter-platform x86_64-unknown-linux-gnu' "$tmp/args" && ! grep -q -- '--features' "$tmp/args" || { echo "FAIL: without CARGO_FEATURES metadata must not get --features: $(cat "$tmp/args")" >&2; exit 1; }
+CARGO_FEATURES=app/some-feature PATH="$tmp/bin:$PATH" bash "$check" "$tmp/sbom.json" app > /dev/null
+grep -q -- '--features app/some-feature' "$tmp/args" || { echo "FAIL: CARGO_FEATURES must reach cargo metadata: $(cat "$tmp/args")" >&2; exit 1; }
+pass=$((pass + 2))
 echo "check-sbom: ${pass} cases passed"

@@ -1,13 +1,13 @@
 // Client contract: the real `listAccessGateEvents` (@meddleware/access-gate-client) and
-// `listSealedContent` (@meddleware/seal-client) read the built `api` binary over HTTP. The database is
-// seeded by the testkit's `seed-fixture` (events BCS-encoded independently of the client parsers).
+// `listSealedContent` (@meddleware/seal-client) read the built `api` binary over HTTP. The database is a
+// throwaway PostgreSQL database with the two production roles, seeded by the testkit's `seed-fixture`
+// (events BCS-encoded independently of the client parsers); the API runs as the SELECT-only role.
 //
+//   TEST_DATABASE_URL=postgres://postgres:pw@127.0.0.1:55432/postgres?sslmode=verify-full&sslrootcert=ca.crt \
 //   API_BIN=../../target/release/api SEED_BIN=../../target/release/seed-fixture npm test
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { resolve } from 'node:path'
 import { listAccessGateEvents } from '@meddleware/access-gate-client'
 import { listSealedContent } from '@meddleware/seal-client'
 import { normalizeSuiAddress } from '@mysten/sui/utils'
@@ -30,16 +30,29 @@ const noRpc = {
   },
 }
 
-let dir: string
+const ADMIN_URL = process.env.TEST_DATABASE_URL
+let database: string
 let api: ChildProcess
 
 beforeAll(async () => {
-  dir = mkdtempSync(join(tmpdir(), 'idx-contract-'))
-  const db = join(dir, 'indexer.db')
-  const seeded = spawnSync(SEED_BIN, [db], { encoding: 'utf8' })
+  if (!ADMIN_URL) throw new Error('TEST_DATABASE_URL (a superuser URL of a PostgreSQL) is required')
+  const seeded = spawnSync(SEED_BIN, ['seed', ADMIN_URL], { encoding: 'utf8' })
   if (seeded.status !== 0) throw new Error(`seed-fixture failed: ${seeded.stderr}`)
+  const fixture = JSON.parse(seeded.stdout.trim().split('\n').pop() ?? '') as {
+    database: string
+    databaseUrl: string
+    allowInsecure: boolean
+  }
+  database = fixture.database
   api = spawn(API_BIN, [], {
-    env: { NETWORK: 'testnet', DB_PATH: db, PORT: String(PORT), RATE_LIMIT_PER_SEC: '1000', RATE_LIMIT_BURST: '1000' },
+    env: {
+      NETWORK: 'testnet',
+      DATABASE_URL: fixture.databaseUrl,
+      ...(fixture.allowInsecure ? { ALLOW_INSECURE_DATABASE: '1' } : {}),
+      PORT: String(PORT),
+      RATE_LIMIT_PER_SEC: '1000',
+      RATE_LIMIT_BURST: '1000',
+    },
     stdio: 'inherit',
   })
   for (let i = 0; i < 100; i++) {
@@ -55,7 +68,7 @@ beforeAll(async () => {
 
 afterAll(() => {
   api?.kill('SIGTERM')
-  rmSync(dir, { recursive: true, force: true })
+  if (ADMIN_URL && database) spawnSync(SEED_BIN, ['drop', ADMIN_URL, database], { encoding: 'utf8' })
 })
 
 const indexer = (url = BASE) => ({ url, network: 'testnet' })
