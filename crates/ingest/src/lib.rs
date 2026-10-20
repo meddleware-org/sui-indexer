@@ -133,8 +133,5 @@ pub async fn healthcheck(database: &DatabaseSettings, poll_ms: u64, now: i64) ->
     }
 }
 
-#[cfg(feature = "import-sqlite")]
-pub mod import_cmd;
-
 #[cfg(test)]
 mod tests;

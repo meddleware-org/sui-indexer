@@ -7,9 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.15] - 2026-10-20
+
+### Removed
+
+- The one-off SQLite importer and `rusqlite`; no behaviour change for the API. Gone: the `import-sqlite` cargo
+  feature (store, ingest, api, testkit), `ingest import-sqlite`, `crates/store/src/import.rs`,
+  `crates/ingest/src/import_cmd.rs`, the testkit's SQLite fixture builder (`seed-fixture sqlite`), the importer
+  tests and the import-parity test with its recorded 0.0.13 answers (`tests/golden`,
+  `scripts/golden-from-0.0.13.sh`), the image's `CARGO_FEATURES` build argument, the `CARGO_FEATURES` option of
+  `scripts/check-sbom.sh`, and `rusqlite`, `libsqlite3-sys` and the crates only they pulled in from `Cargo.lock`.
+  The image links no SQLite; its `ingest` binary is 2.1 MB smaller.
+
 ### Changed
 
-- Release workflow only (no code or image change, no version bump): `docker-publish.yml` builds amd64 and arm64
+- Release workflow only (no code or image change): `docker-publish.yml` builds amd64 and arm64
   on native runners instead of one QEMU-emulated build (the 0.0.14 publish took about 1.5 hours). The builds hold
   no registry credentials; a merge job builds the index, scans it by digest, signs and attests it as before
   (D61). A manual run is a dry run that publishes nothing. New `scripts/check-index.sh`.

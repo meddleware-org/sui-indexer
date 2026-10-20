@@ -28,9 +28,3 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
-
-# Local SQLite index (DB_PATH in development) and its backups
-*.db
-*.db-wal
-*.db-shm
-*.bak-*

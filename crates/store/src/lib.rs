@@ -4,8 +4,8 @@
 //!   holding the single-writer advisory lock, the owner role, migrations at startup.
 //! - [`Reader`] is the API's pool over the **SELECT-only** role; it never migrates.
 //!
-//! The logical schema, meta keys, generation semantics and counters are those of the SQLite store of
-//! 0.0.4-0.0.13 (`migrations/0001_init.sql` maps it to PostgreSQL column types and constraints).
+//! The logical schema (`migrations/0001_init.sql`), meta keys, generation semantics and counters are
+//! documented in the README.
 //!
 //! Rows get ascending ids in ingest order (an identity column written by one connection), and ingest
 //! reads the ledger in ascending order, so `id` is ledger order: a page bounded by `before_id` never
@@ -16,8 +16,6 @@
 pub mod config;
 pub mod db;
 pub mod error;
-#[cfg(feature = "import-sqlite")]
-pub mod import;
 pub mod migrate;
 mod read;
 pub mod reader;

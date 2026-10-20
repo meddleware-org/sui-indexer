@@ -31,8 +31,6 @@ The `sui-indexer` service source and image. Out of scope: the Sui full node, the
    - **The database connection is authenticated both ways.** `sslmode=verify-full` against the tier's CA
      (mounted from a ConfigMap) is required; the other modes are refused. Each role can reach only its own
      database (`REVOKE ALL … FROM PUBLIC`), with a connection limit and statement timeouts.
-   - The one-off SQLite importer (0.0.14 only) runs as a Job with the owner's login, reads the old volume read-only and
-     takes the writer lock; it is removed in 0.0.15.
 
 **Shared fate.** The database tier also serves the auth stack; a runaway client is bounded by per-role limits and
 timeouts, but an outage of the tier takes the index with it. The index is display data and its clients fall back to the

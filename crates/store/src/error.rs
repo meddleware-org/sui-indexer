@@ -36,7 +36,7 @@ impl fmt::Display for StoreError {
             StoreError::Config(m) | StoreError::Migration(m) | StoreError::Data(m) => f.write_str(m),
             StoreError::WriterLockHeld => f.write_str(
                 "another process holds the writer lock of this database (only one ingester may write: \
-                 check for a second ingest pod or a running import)",
+                 check for a second ingest pod)",
             ),
         }
     }

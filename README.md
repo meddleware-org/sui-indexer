@@ -16,8 +16,7 @@ back to the full node when it is unavailable.
   - Measured 2026-10-20 on a shared 4-CPU laptop (release build, PostgreSQL 18 with TLS on the same host, pool of
     8, a closed-loop client with 64 keep-alive connections competing for the same cores; one-off, not a
     benchmark): the API serves about 3.6-4k req/s of the head page, a rare-kind page or a gate page, 2.5k for two
-    kinds, 9.6k for `/coverage`, at about 10 MB RSS, with 17 rows or 300,000 (the 0.0.13 SQLite build did 18k and
-    14k in-process). The ingester is about 6 MB. Request cost does not grow with history; Cloudflare's cache
+    kinds, 9.6k for `/coverage`, at about 10 MB RSS, with 17 rows or 300,000. The ingester is about 6 MB. Request cost does not grow with history; Cloudflare's cache
     (below) is what the public sees.
 - **Same decoding as the apps.** The ingester does not decode BCS. It takes the event kind from the type
   name and the gate and commission from the full node's JSON rendering, and stores the BCS verbatim; the
@@ -120,17 +119,8 @@ All routes are `GET` (and `HEAD`), and responses are JSON with `Access-Control-A
 - **Liveness.** `ingest --healthcheck` exits 0 while PostgreSQL answers and the ingester refreshed
   `heartbeats ingest:alive` within `5 × POLL_MS + 30 s`; it is the container's exec probe (distroless has no
   shell). The API's liveness probe is a TCP check: a database outage must not restart it (`/readyz` reports it).
-- **Upgrade from 0.0.13 (SQLite) to 0.0.14 (PostgreSQL).** A one-off import keeps the ids, generation, cursors
-  and counters, so clients' cached cursors and ETags stay valid:
-  `ingest import-sqlite <path> [--replace-existing]` (only in the 0.0.14 image, built with the cargo feature
-  `import-sqlite`). It reads the SQLite file read-only, copies everything into an EMPTY PostgreSQL index in one
-  transaction, verifies row counts per stream, every cursor, the commission total, the largest id, a SHA-256 over
-  `id:tx_digest:event_index` in id order and a recount of the counters, prints a report and commits only if all of
-  it holds. **0.0.15 removes the feature, SQLite and the importer** (tracked in the infrastructure workspace's
-  `OPERATOR_TASKS.md`). The cutover runbook is `post-bootstrap/sui-indexer/migration/README.md` there.
-- **No counter backfill.** The SQLite store rebuilt counters for databases that predated them; the PostgreSQL
-  schema is created with them, every row enters through `ingest` (which updates them in the same transaction),
-  and the importer copies and re-verifies the old ones (`Store::verify_counters` recounts from the rows).
+- **No counter backfill.** The PostgreSQL schema is created with the counters, and every row enters through
+  `ingest`, which updates them in the same transaction (`Store::verify_counters` recounts from the rows).
 - **Image contents.** `/app/api`, `/app/ingest`, `Cargo.lock` (for scanners), `THIRD_PARTY_LICENSES-api.txt`
   and `THIRD_PARTY_LICENSES-ingest.txt` (cargo-about) and `LICENSE`. No volume: all state is in PostgreSQL.
   The CA that verifies the server is mounted at run time (`/etc/postgres-ca/ca.crt`).
@@ -147,7 +137,6 @@ The tests run against a real PostgreSQL 18 with TLS. `scripts/test-postgres.sh` 
 DOCKER=podman bash scripts/test-postgres.sh start && . "${TMPDIR:-/tmp}/sui-indexer-test-pg/env.sh"   # TEST_DATABASE_URL, REQUIRE_TEST_DATABASE=1
 cargo fmt --check && cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked                   # each test gets its own database and the two production roles
-cargo test --workspace --locked --all-features    # + the temporary SQLite importer and the import-parity check
 cargo deny check                                  # advisories, licences, bans, sources
 cargo build --release --locked
 # a local run against testnet, with the roles of the database tier (or any database you own):
@@ -159,16 +148,12 @@ DOCKER=podman bash scripts/test-postgres.sh stop
 
 Without `TEST_DATABASE_URL` the database tests print `SKIPPED` and return; CI sets `REQUIRE_TEST_DATABASE=1` (a
 missing server is a failure) and fails on any ignored test. Test layers: pure unit tests (URL and config parsing,
-paging logic), tests against PostgreSQL (store, API handler, ingest loop, importer), the socket wiring, the
+paging logic), tests against PostgreSQL (store, API handler, ingest loop), the socket wiring, the
 client contract and the image smoke test.
 
 The client contract (`tests/contract`, CI only) runs the published client packages against the built
 `api` binary, with a database seeded by the testkit's `seed-fixture`:
 `cargo build --release -p sui-indexer-api -p sui-indexer-testkit && cd tests/contract && npm ci && TEST_DATABASE_URL=… npm test`.
-
-`tests/golden/0.0.13.json` holds the answers of a real 0.0.13 SQLite `api` over the importer's fixture
-(`scripts/golden-from-0.0.13.sh`); `crates/api/tests/import_parity.rs` requires the imported PostgreSQL index to
-reproduce them byte for byte.
 
 Container image: `quay.io/meddleware-org/sui-indexer`, built by `docker-publish.yml` on a `v*` tag.
 The tag must match the Cargo workspace version. Deployment manifests live in the infrastructure workspace

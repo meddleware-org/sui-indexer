@@ -11,9 +11,6 @@ use serde_json::{Value, json};
 use sui_indexer_store::sui::normalize_sui_address;
 use sui_indexer_store::{IndexedEvent, Store, Stream};
 
-#[cfg(feature = "import-sqlite")]
-pub mod sqlite;
-
 pub fn addr(s: &str) -> String {
     normalize_sui_address(s)
 }

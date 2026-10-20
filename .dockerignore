@@ -4,6 +4,3 @@ target
 .github
 *.md
 .env*
-*.db
-*.db-*
-*.bak-*

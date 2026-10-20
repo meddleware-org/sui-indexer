@@ -5,7 +5,7 @@
 //!   a change is a new file.
 //! - **Race-free.** Each migration runs in its own transaction that first takes
 //!   `pg_advisory_xact_lock(MIGRATION_LOCK_KEY)`, so two starts never apply the same one (the writer
-//!   lock already makes a second ingester impossible; this also covers the importer and tooling).
+//!   lock already makes a second ingester impossible; this also covers tooling).
 //! - **Expand, then contract.** The API runs the previous image's queries while a new ingester migrates, so
 //!   a migration must keep the previous version's queries working (add, don't rename or drop in one step).
 //!   The API serves once `schema_migrations` reaches [`SCHEMA_VERSION`] or higher.

@@ -285,8 +285,8 @@ fn events_response(req: &ApiRequest<'_>, before_id: Option<i64>, snap: EventsSna
     json(200, &body, vec![("Cache-Control", cache_control.into()), ("ETag", etag)])
 }
 
-/// One events route: the order of checks is the SQLite API's (not ready `503`, then the cursor's syntax `400`,
-/// then its generation `410`, then the limit `400`), with one statement answering generation, head and page.
+/// One events route: the order of checks is: not ready `503`, then the cursor's syntax `400`,
+/// then its generation `410`, then the limit `400`, with one statement answering generation, head and page.
 async fn events_route(
     ctx: &ApiContext,
     req: &ApiRequest<'_>,

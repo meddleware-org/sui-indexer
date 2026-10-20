@@ -15,10 +15,6 @@ workspace = true
 name = "ingest"
 path = "src/main.rs"
 
-[features]
-# The one-off SQLite importer (`ingest import-sqlite`): in the 0.0.14 image only; 0.0.15 removes it.
-import-sqlite = ["sui-indexer-store/import-sqlite", "sui-indexer-testkit/import-sqlite"]
-
 [dependencies]
 sui-indexer-store = { path = "../store" }
 # Mysten's official Rust SDK (sui-rust-sdk): native gRPC client for LedgerService.ListEvents /
@@ -33,7 +29,6 @@ serde_json = "=1.0.154"
 
 [dev-dependencies]
 sui-indexer-store = { path = "../store", features = ["testing"] }
-tempfile = "=3.27.0"
 tokio = { version = "=1.53.3", features = ["rt", "macros", "time", "net", "test-util"] }
 # A local LedgerService stub for the gRPC source tests (generated server of sui-rpc).
 tonic = { version = "=0.14.6", default-features = false, features = ["server", "router", "transport", "codegen"] }

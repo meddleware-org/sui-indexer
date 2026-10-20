@@ -1,5 +1,5 @@
-//! The writer: owned by the ingester, the only process that writes the index (and the importer, which
-//! takes the same lock). Every write path of the indexer is here.
+//! The writer: owned by the ingester, the only process that writes the index. Every write path of the
+//! indexer is here.
 //!
 //! **Single writer, enforced.** [`Store::connect`] takes `pg_try_advisory_lock(WRITER_LOCK_KEY)` on its one
 //! connection and holds it for the life of the process; a second writer fails with
@@ -186,14 +186,9 @@ impl Store {
         Ok(Store { client, generation, stmts })
     }
 
-    /// The underlying connection (tests, the importer and the parity tooling use it directly).
+    /// The underlying connection (tests and tooling use it directly).
     pub fn client(&self) -> &Client {
         &self.client
-    }
-
-    #[cfg(feature = "import-sqlite")]
-    pub(crate) fn client_mut(&mut self) -> &mut Client {
-        &mut self.client
     }
 
     /// Whether the connection (and with it the writer lock) is gone.
@@ -204,11 +199,6 @@ impl Store {
     /// Random per index build; API cursors carry it, and a cursor from another generation is refused.
     pub fn generation(&self) -> &str {
         &self.generation
-    }
-
-    #[cfg(feature = "import-sqlite")]
-    pub(crate) fn set_generation(&mut self, g: String) {
-        self.generation = g;
     }
 
     /// Bind each stream to the package (original id) it indexes. A stream recorded under a different
@@ -418,7 +408,7 @@ impl Store {
 
     /// Recount the counters from the rows and compare them with the maintained ones; the differences
     /// found (empty when they agree). The ingest transaction keeps them exact; this is the check the
-    /// importer and the tests use.
+    /// tests use.
     pub async fn verify_counters(&self) -> Result<Vec<String>> {
         verify_counters(&self.client).await
     }

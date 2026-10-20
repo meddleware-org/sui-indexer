@@ -1,6 +1,6 @@
 # Security Audit — `sui-indexer`
 
-**Classification:** Internal security review (re-verified 2026-10-09; code gates closed 2026-10-18; re-verified 2026-10-19 against the Rust rewrite 0.0.12; F25 closed in 0.0.13; re-verified 2026-10-20 against the PostgreSQL storage 0.0.14 — awaiting external review)
+**Classification:** Internal security review (re-verified 2026-10-09; code gates closed 2026-10-18; re-verified 2026-10-19 against the Rust rewrite 0.0.12; F25 closed in 0.0.13; re-verified 2026-10-20 against the PostgreSQL storage 0.0.14; SQLite importer removed in 0.0.15, 2026-10-20 — awaiting external review)
 **Project:** sui-indexer — a lean read-indexer for display data.
 
 - It polls two streams from a Sui full node over gRPC into PostgreSQL (the platform's shared database tier; SQLite up to 0.0.13):
@@ -31,8 +31,14 @@ packages against the binary (lockfile committed, Dependabot-tracked, never shipp
 
 **Deployment status:**
 
-- **2026-10-20: `0.0.14` (storage moved to the shared PostgreSQL tier, F27–F32, OQ7) committed locally, not released
-  or deployed.** Commits on top of `c0ab2fa`. `config/images.yaml` and the overlay pin 0.0.13
+- **2026-10-20: `0.0.15` (the one-off SQLite importer and `rusqlite` removed; no behaviour change for the API; F31) committed
+  locally, not released.** Per the maintainer the cutover to PostgreSQL is done and settled: the legacy SQLite Deployment, the import Job,
+  the old PVC, the legacy NetworkPolicies and the server backup of the old volume are deleted from the cluster (not re-observed by this review;
+  `config/images.yaml` pins the 0.0.14 digest `sha256:ed5f66b2…0566`). In the workspace `post-bootstrap/sui-indexer/migration/` is deleted and
+  `apply.sh` keeps only the first-apply check for the database Secrets and the CA. The overlay is not changed by this work: the maintainer tags
+  `v0.0.15` and pins the digest.
+- **2026-10-20 (earlier, historical): `0.0.14` (storage moved to the shared PostgreSQL tier, F27–F32, OQ7) committed locally, not released
+  or deployed at that time.** Commits on top of `c0ab2fa`. `config/images.yaml` and the overlay pin 0.0.13
   (`sha256:82f631e6…8825`, the SQLite image; the maintainer's current image) and are not changed by this work. The
   workspace manifests are rewritten (`post-bootstrap/sui-indexer`: two Deployments, per-pod NetworkPolicies, no PVC;
   `migration/`: the one-off import Job, the cutover runbook and the legacy manifests for rollback) and **must not be
@@ -79,7 +85,7 @@ packages against the binary (lockfile committed, Dependabot-tracked, never shipp
   `VITE_INDEXER_URL` (`https://sui-indexer.meddleware.co.uk`). Decoding happens in access-gate-client
   (0.0.8) and seal-client (0.0.19).
 
-**Review date:** 2026-10-03; re-verified 2026-10-09 (code at `a3369bb` = tag `v0.0.9`); code gates closed in 0.0.10 (`5251f38`), released and deployed 2026-10-18; re-verified 2026-10-19 against the Rust rewrite (0.0.12, local commits, not released); F25 fixed in 0.0.13 (local commit); re-verified 2026-10-20 against 0.0.14 (PostgreSQL storage, local commits, not released)
+**Review date:** 2026-10-03; re-verified 2026-10-09 (code at `a3369bb` = tag `v0.0.9`); code gates closed in 0.0.10 (`5251f38`), released and deployed 2026-10-18; re-verified 2026-10-19 against the Rust rewrite (0.0.12, local commits, not released); F25 fixed in 0.0.13 (local commit); re-verified 2026-10-20 against 0.0.14 (PostgreSQL storage, local commits, not released); 0.0.15 (importer removed) re-verified the same day
 **Reviewer:** Internal review
 **Severity ceiling:** Medium.
 
@@ -117,6 +123,10 @@ F30 (migration safety, Positive), F31 (the temporary SQLite import path, MITIGAT
 `verify-full` to the database and secret handling, Positive). F3 stays MITIGATED (the database tier's daily dump now covers
 the index; the offsite copy is operator work and not configured). Totals for F1–F32: 16 RESOLVED, 3 MITIGATED (F2, F3, F31),
 3 ADJUDICATED, 1 ACCEPTED-RISK (F28), 1 DEFERRED (F19, a client change), 8 Positive (F12, F13, F14, F22, F27, F29, F30, F32).
+**2026-10-20 (0.0.15, the SQLite importer removed):** F31 is RESOLVED: the `import-sqlite` feature, `ingest import-sqlite`, `rusqlite`/`libsqlite3-sys` and the
+crates only they pulled in, the importer and parity tests, the SQLite fixture builder, `tests/golden`, `migration/` and the legacy manifests are gone (evidence in F31).
+A41, A42 and A48 are N/A (the data moved and the importer no longer exists); the Section D rows for the 0.0.14 cutover and the 0.0.15 removal are ticked. Totals for F1–F32:
+17 RESOLVED, 2 MITIGATED (F2, F3), 3 ADJUDICATED, 1 ACCEPTED-RISK (F28), 1 DEFERRED (F19, a client change), 8 Positive (F12, F13, F14, F22, F27, F29, F30, F32).
 
 **Front matter (RUST lens, from 0.0.12):**
 
@@ -165,25 +175,39 @@ Up to 0.0.11 (TS lens): npm lockfile; esbuild bundle `dist/main.mjs` (603 kB); N
 
 ## Executive summary
 
+**2026-10-20 — the one-off SQLite importer is removed (0.0.15, local commit; F31 RESOLVED).** Nothing of SQLite is left in the code, the image or the
+supply chain: the `import-sqlite` cargo feature (store, ingest, api, testkit), `ingest import-sqlite`, `crates/store/src/import.rs`,
+`crates/ingest/src/import_cmd.rs`, the testkit's SQLite fixture builder (`seed-fixture sqlite`), the importer tests (`crates/ingest/tests/import_sqlite.rs`, 9) and the
+import-parity test (`crates/api/tests/import_parity.rs`, with `tests/golden/0.0.13.json` and `scripts/golden-from-0.0.13.sh`) are deleted, with
+`rusqlite` and `libsqlite3-sys` and the crates only they pulled in (`rsqlite-vfs`, `sqlite-wasm-rs`, `hashlink`, `fallible-streaming-iterator`, `foldhash`,
+`hashbrown` 0.16, `vcpkg`; the ingester's SBOM goes from 182 to 175 crates, the API's 116 is unchanged). The Dockerfile has no feature argument
+(still two cargo invocations, one per binary); `rust-ci.yml`, `docker-publish.yml`, `scripts/check-sbom.sh` (its `CARGO_FEATURES` option) and `scripts/smoke.sh` (the importer step) lose
+every feature reference. No behaviour change for the API: the HTTP surface, the schema and the migrations are untouched (`0001_init.sql` keeps its original text, including a
+comment that names the old SQLite store, because a migration's checksum must never change). The import-parity test is **not** re-based on a PostgreSQL fixture:
+it compared the PostgreSQL API with answers recorded from the SQLite API over a SQLite fixture, so without that comparison a recording of the PostgreSQL API
+would only snapshot itself; the response contract stays pinned by the 43 handler tests and by the client-contract job (5 tests, the published clients against the
+built `api`). Tests: 144 (store 65, ingest 36, api 43), the same as the default build of 0.0.14; the 10 importer and parity tests are gone. Section D: the
+rows for the 0.0.14 cutover and the 0.0.15 removal are ticked (the cutover on the maintainer's report, not re-observed here).
+
 **2026-10-20 — storage in the shared PostgreSQL tier (0.0.14, local commits; D59 revised, D60, OQ7).** The index
 moves from the indexer's own SQLite file to its own database `sui_indexer` on the platform's `database` tier, with two
 roles and two Deployments. The HTTP API is unchanged: 53 routes (heads, older pages, every filter shape, stats,
 validation errors, redirects, 304s, preflight) answer **byte-identically** to a real 0.0.13 `api` binary over the same
-data (`tests/golden/0.0.13.json`, regenerated by `scripts/golden-from-0.0.13.sh`; `crates/api/tests/import_parity.rs`), and a
+data (`tests/golden/0.0.13.json`, regenerated by `scripts/golden-from-0.0.13.sh`; `crates/api/tests/import_parity.rs`; all three removed in 0.0.15), and a
 fresh ingest from the public testnet node answered 97 routes identically to the live `https://sui-indexer.meddleware.co.uk`
 (same 17 events, same ids; generation, ETag generation and poll times aside).
 
 | Module | What changed |
 | --- | --- |
-| `store` (`db`, `migrate`, `writer`, `reader`, `read`, `import`, `testdb`, `config`) | the only crate with SQL, now on `tokio-postgres`: `Store` = the owner connection holding `pg_try_advisory_lock` (single writer), migrations under `pg_advisory_xact_lock`, atomic page + cursor + counters; `Reader` = the API's pool over the SELECT-only role, **one statement per request** (head, counters and page in one snapshot); `DATABASE_URL` parsing with `verify-full` TLS only; the temporary SQLite importer (feature `import-sqlite`) |
-| `ingest` | `start` connects, takes the writer lock, migrates, binds packages (backup = a `bak_<ms>` schema copy in the same transaction as the clearing), checks the chain; `run_loop` ends non-zero if the connection (the lock) is lost; `--healthcheck` reads the heartbeat from PostgreSQL; `import-sqlite` |
+| `store` (`db`, `migrate`, `writer`, `reader`, `read`, `import`, `testdb`, `config`) | the only crate with SQL, now on `tokio-postgres`: `Store` = the owner connection holding `pg_try_advisory_lock` (single writer), migrations under `pg_advisory_xact_lock`, atomic page + cursor + counters; `Reader` = the API's pool over the SELECT-only role, **one statement per request** (head, counters and page in one snapshot); `DATABASE_URL` parsing with `verify-full` TLS only; the temporary SQLite importer (feature `import-sqlite`; removed in 0.0.15) |
+| `ingest` | `start` connects, takes the writer lock, migrates, binds packages (backup = a `bak_<ms>` schema copy in the same transaction as the clearing), checks the chain; `run_loop` ends non-zero if the connection (the lock) is lost; `--healthcheck` reads the heartbeat from PostgreSQL; `import-sqlite` (removed in 0.0.15) |
 | `api` | async handler over `Reader`; `503` until the schema is at the needed version and `503 database unavailable` while PostgreSQL cannot be reached; liveness no longer depends on the database |
-| workspace `post-bootstrap/sui-indexer` | two Deployments (`sui-indexer-ingest`, `sui-indexer-api`), per-pod NetworkPolicies, no PVC; `migration/` (import Job, runbook, legacy manifests for rollback) |
+| workspace `post-bootstrap/sui-indexer` | two Deployments (`sui-indexer-ingest`, `sui-indexer-api`), per-pod NetworkPolicies, no PVC; `migration/` (import Job, runbook, legacy manifests for rollback; deleted in 0.0.15) |
 
 - **Tests (2026-10-20):** 144 Rust tests against a real PostgreSQL 18 with TLS (store 65, ingest 36, api 43; the 111
   cases of 0.0.13 are ported, and the WAL-persistence, cutover-copy and counter-backfill ones are replaced), **154 with `--features import-sqlite`** (the importer: 9; the
-  import parity: 1); 5 client-contract tests (the published clients against the built `api`, a seeded database, the API
-  as the SELECT-only role); 12 SBOM-gate script cases; the container smoke test (PostgreSQL with TLS, two containers,
+  import parity: 1; both removed in 0.0.15, back to 144); 5 client-contract tests (the published clients against the built `api`, a seeded database, the API
+  as the SELECT-only role); 12 SBOM-gate script cases (11 in 0.0.15); the container smoke test (PostgreSQL with TLS, two containers,
   role separation, a second ingester refused, database outage and recovery). Line coverage 89.4% (`cargo llvm-cov
   --all-features`; both `main.rs` and `seed-fixture` are thin and run by the smoke and contract jobs). Every database
   test runs as the two production roles in an isolated database; CI sets `REQUIRE_TEST_DATABASE=1` and fails on any
@@ -284,8 +308,8 @@ cites the commit and the test that pins it.
 
 | Disposition | Findings |
 | --- | --- |
-| RESOLVED | F1 (full-stream scans), F25 (rare-kind `kinds` filters; `events_kind`, 0.0.13), F4 and F18 (SBOM of the bundled code: npm in 0.0.10, Cargo per binary in 0.0.12), F5 (licence notices), F6 (cache key and limiter), F9 (casts, ETags), F10 (CI and image pipeline), F11 (documentation drift; last residual fixed 2026-10-19), F15 (pruned-cursor wedge), F16 (chain-identity startup bug; the startup path is now tested), F17 (libssl advisories in the base image), F20 (operator-keyed lookups), F21 (`noUncheckedIndexedAccess`; TS-only, superseded), F23 (health across two processes, 0.0.12), F26 (connection cap, 0.0.12) |
-| MITIGATED | F2 (stuck ingest; clients ignore `polledAt`, see F19), F3 (history loss on config change fixed; loss of the storage is now covered by the database tier's daily dump, the offsite copy is operator work and not configured), F31 (the temporary SQLite import path; removed in 0.0.15) |
+| RESOLVED | F1 (full-stream scans), F25 (rare-kind `kinds` filters; `events_kind`, 0.0.13), F4 and F18 (SBOM of the bundled code: npm in 0.0.10, Cargo per binary in 0.0.12), F5 (licence notices), F6 (cache key and limiter), F9 (casts, ETags), F10 (CI and image pipeline), F11 (documentation drift; last residual fixed 2026-10-19), F15 (pruned-cursor wedge), F16 (chain-identity startup bug; the startup path is now tested), F17 (libssl advisories in the base image), F20 (operator-keyed lookups), F21 (`noUncheckedIndexedAccess`; TS-only, superseded), F23 (health across two processes, 0.0.12), F26 (connection cap, 0.0.12), F31 (the temporary SQLite import path; removed in 0.0.15) |
+| MITIGATED | F2 (stuck ingest; clients ignore `polledAt`, see F19), F3 (history loss on config change fixed; loss of the storage is now covered by the database tier's daily dump, the offsite copy is operator work and not configured) |
 | ADJUDICATED | F7 (new event types need a fresh publish), F8 (display-only trust in the node; chain identity now checked), F24 (stored columns from the node's JSON rendering; parity gate) |
 | ACCEPTED-RISK | F28 (shared fate with the auth PostgreSQL; D59, mitigations in the finding) |
 | DEFERRED | F19 (clients treat a stale head page as unavailable): pre-mainnet gate row in Section D; the change lives in access-gate-client and seal-client |
@@ -306,7 +330,7 @@ cites the commit and the test that pins it.
 - 2026-10-20: the storage becomes a network database. The boundary moves from "a read-only file mount" to "a database
   role that has no write grant" (F22, F27), the single-writer rule from "one process on one volume" to an advisory lock
   (F29), the schema from `CREATE IF NOT EXISTS` to versioned migrations (F30). New trust points: the shared PostgreSQL's
-  availability (F28) and, for one release, the import path (F31). The single `unsafe` call of the SQLite era is gone.
+  availability (F28) and, for one release (0.0.14), the import path (F31, removed in 0.0.15). The single `unsafe` call of the SQLite era is gone.
 
 ---
 
@@ -364,6 +388,12 @@ Up to 0.0.11 (TS lens): dependency authors were the two clients and `@mysten/sui
 Critical / High / Medium / Low / Info / Positive.
 
 ## Scope
+
+**In scope 2026-10-20 (0.0.15, the importer removed; local commit on top of `eb8e46a`):** the deletions listed in the Executive summary; `Cargo.toml`/`Cargo.lock`
+(version, removed packages), the three crate manifests, `crates/store/src/{lib,writer,error,migrate,tests}.rs`, `crates/ingest/src/{lib,main}.rs`, `crates/testkit/src/{lib,main}.rs`,
+`crates/api/src/handler.rs` (comments), `Dockerfile`, `about.hbs`, `scripts/{smoke.sh,check-sbom.sh,tests/check-sbom-test.sh}`, both workflows, `README.md`, `CLAUDE.md`, `AGENTS.md`,
+`SECURITY.md`, `CHANGELOG.md`; workspace `post-bootstrap/sui-indexer/{apply.sh,README.md,base/kustomization.yaml}` (`migration/` deleted), `OPERATOR_TASKS.md`, `STORAGE.md`,
+`docs/architecture/ADR-0001-chain-access-layering.md`, `docs/STATE.md`, `docs/audit/LENS_GROUNDING_LOG.md`.
 
 **In scope 2026-10-20 (0.0.14, PostgreSQL; local commits on top of `c0ab2fa`):** the Rust workspace as for 0.0.12, with `crates/store/src/{db,error,migrate,read,reader,writer,import,testdb}.rs` and
 `crates/store/migrations/0001_init.sql`, `crates/ingest/src/import_cmd.rs` and `crates/ingest/tests/`, `crates/api/tests/import_parity.rs`, `crates/testkit/src/sqlite.rs`,
@@ -430,6 +460,21 @@ configuration and the cluster platform (platform lens).
 | Docker Hub referrers of the 0.0.9 index | GitHub provenance (`slsa.dev/provenance/v1`), cosign signature, and the SPDX SBOM attestation (annotation still reads `cosign/sign/v1`). The SBOM has 17 packages: the 15 Debian/Node packages, the root `@meddleware/sui-indexer` and the image; **none** of the bundled npm packages (F18) |
 | Live service | `/healthz` 200 with both streams ok; coverage and gate stats as in Deployment status; `limit=05` answered `301` to `limit=5` with `max-age=86400`; head page `Cache-Control: public, max-age=10, s-maxage=30` with an ETag |
 | Coverage run | **not run** (plugin not installed); first-pass figures: 82.01% statements / 85.64% branches / 75% functions / 83.21% lines at 0.0.4 |
+
+**Environment / commands (2026-10-20, 0.0.15; `cargo +stable` 1.98.1, Linux x86_64, PostgreSQL 18 in rootless podman with TLS from `scripts/test-postgres.sh`):**
+
+| Command | Result |
+| --- | --- |
+| `cargo +stable fmt --check` / `cargo clippy --workspace --all-targets --locked -- -D warnings` | clean / clean (the second feature set no longer exists) |
+| `cargo test --workspace --locked` | **144 passed** (store 65, ingest 36, api 43), 0 ignored, 0 skipped |
+| `cargo llvm-cov --workspace --locked --summary-only` | lines 89.2%, functions 88.4%, regions 89.4% (0.0.14: 89.4 / 89.1 / 87.3 with the importer) |
+| `cargo +1.88 check --locked --workspace --all-targets`; `cargo +1.88 test --locked --workspace` | passes; 144 passed (store 65, ingest 36, api 43); MSRV 1.88 unchanged |
+| `cargo deny check` | advisories ok, bans ok, licenses ok, sources ok (every licence in `deny.toml` and `about.toml` is still in use; none was SQLite-only) |
+| `cargo about generate --locked --fail` for both binaries | passes; the notices no longer mention SQLite |
+| `cargo cyclonedx` + `scripts/check-sbom.sh`, no feature argument | `api` lists all 116 crates, `ingest` all 175 (was 182 with `rusqlite`); `scripts/tests/check-sbom-test.sh` 11 cases and `check-index-test.sh` 9 cases pass |
+| `cargo build --release --locked -p sui-indexer-api -p sui-indexer-ingest` | release binaries: `api` 2,862,848 bytes (0.0.14: 2,847,120), `ingest` 4,327,128 bytes (0.0.14 with `rusqlite`: 6,414,464; -2.09 MB, -32.5%); built per binary as the Dockerfile does |
+| `grep -rniE 'sqlite\|import-sqlite\|rusqlite\|indexer\.db\|DB_PATH\|VACUUM' crates scripts .github Dockerfile Cargo.lock` | one match in code: the comment of the immutable migration `0001_init.sql` (Executive summary) |
+| Not run | the GitHub workflows (publish, Trivy, cosign, actionlint); the image build and the smoke test (no container build daemon in this session: the smoke script lost its importer step and was renumbered, checked with `bash -n`); the client-contract job; `kubectl` of any kind |
 
 **Environment / commands (2026-10-20, 0.0.14; `cargo +stable` 1.98.1, Linux x86_64, 4 CPUs shared with other workloads; PostgreSQL 18.6 in rootless podman with TLS, a throwaway CA, `scripts/test-postgres.sh`; roles also created by the real `provision.sh`):**
 
@@ -1005,7 +1050,7 @@ the access-gate-client audit (exact-type matching at the original ID).
 
 **Re-verified 2026-10-19 (0.0.12, Rust):** `rust-ci.yml` replaces `node-ci.yml`: fmt, clippy `-D warnings`, tests, coverage, cargo-deny, the SBOM gate, MSRV, the client-contract job, Trivy config scan, licence notices, image build, Trivy image scan and the two-container smoke test (`scripts/smoke.sh`, now also checking the read-only API mount, the `503` before the database exists, the exec healthcheck and serving after the ingester stops). The release reuses it (`verify: uses: ./.github/workflows/rust-ci.yml`); the tag is compared with the Cargo workspace version. Every action stays SHA-pinned (pins copied from gateway-rust and the previous workflows). Disposition unchanged (RESOLVED).
 
-**Re-verified 2026-10-20 (0.0.14):** The CI now starts a PostgreSQL 18 with TLS (`scripts/test-postgres.sh`: the image the database tier runs, pinned by digest, a throwaway CA, started by a script rather than as a `services:` container because the tests need TLS) for the `check`, `msrv` and `contract` jobs; `REQUIRE_TEST_DATABASE=1` makes a missing server a failure, and the test step fails on any ignored or skipped test. The default build and the `--all-features` build (the temporary importer and the import-parity check) are both linted and tested; the SBOM gate is per binary and per feature set (F18); the image job runs the new smoke test (PostgreSQL, two containers). Not run here: the GitHub workflows themselves.
+**Re-verified 2026-10-20 (0.0.14):** The CI now starts a PostgreSQL 18 with TLS (`scripts/test-postgres.sh`: the image the database tier runs, pinned by digest, a throwaway CA, started by a script rather than as a `services:` container because the tests need TLS) for the `check`, `msrv` and `contract` jobs; `REQUIRE_TEST_DATABASE=1` makes a missing server a failure, and the test step fails on any ignored or skipped test. The default build and the `--all-features` build (the temporary importer and the import-parity check) are both linted and tested (0.0.15: only the default build remains); the SBOM gate is per binary and per feature set (F18; 0.0.15: per binary); the image job runs the new smoke test (PostgreSQL, two containers). Not run here: the GitHub workflows themselves.
 
 **Re-verified 2026-10-20 (release workflow, D61; commit 417b5ff):** `docker-publish.yml` no longer builds both architectures in one QEMU-emulated job (the 0.0.14 publish took about 1.5 hours, almost all of it the arm64 compile). It is now `version`, `verify` (`rust-ci.yml`) and `sbom-crates` (the two CycloneDX per-binary SBOMs, checked by `scripts/check-sbom.sh`), then `build` (a matrix: amd64 on `ubuntu-latest`, arm64 on the native `ubuntu-24.04-arm`; OCI archives, `provenance: mode=max`, **no registry credentials** in the job that compiles the dependencies), `publish-arch` (pushes `<commit>-<arch>` with `skopeo copy --all`, keeping each image's provenance), `merge-docker-public` (`docker buildx imagetools create` per registry, the quay.io and Docker Hub digests asserted equal, `scripts/check-index.sh` asserting both architectures and both attestations, **Trivy by digest, then** cosign sign, the syft SPDX and two CycloneDX attestations, the build-provenance attestation on both registries, output `digest`) and `mirror-private` (unchanged, still by digest). Tags, labels (the same `docker/metadata-action` configuration in each build), build arguments, `latest=auto` and the signer identity `docker-publish.yml@refs/tags/v*` are unchanged; `setup-qemu-action` is gone. The intermediate `<commit>-amd64` / `<commit>-arm64` tags are left in place, as in `nft-gate` and `seal-key-server` (the registries' push credentials cannot be assumed to delete, deleting a tag does not delete the manifests the index references, and `verify-digests.sh` ignores them: its newest-tag check reads only `N.N.N` tags). A `workflow_dispatch` run is a **dry run** (input `dry_run`, default on): both native builds, then the merge, `check-index.sh`, a label check and the Trivy scan against a throwaway `registry:3` service on the runner; no push, no signature, no secret. Evidence on 2026-10-20: `actionlint` clean; the merge step reproduced locally, with the installed `docker buildx` 0.37 against a local registry, from the two per-architecture indexes of the published `seal-key-server` (which uses the same OCI-archive plus `skopeo` flow): the merged digest `sha256:8609cbbe…5497134` equals the published `0.0.2` index byte for byte, so the merge is deterministic and keeps the provenance; `check-index.sh` passes on the published `sui-indexer` 0.0.13, `seal-key-server` 0.0.2 and `nft-gate-gateway` 0.0.24 indexes and fails on a per-architecture index; `scripts/tests/check-index-test.sh` (9 cases, run in `rust-ci.yml`); Trivy 0.74.0 scanned a localhost registry image by digest with `TRIVY_NON_SSL`. **Not yet exercised on GitHub:** the native arm64 build, the OCI-archive export of this Dockerfile, `skopeo` pushes with the real credentials, signing and attestation of the merged digest, and the dry-run job itself; the next tag (or a manual dry run once this is on the default branch) is their test.
 
@@ -1129,7 +1174,9 @@ the documented cache headers.
 
 **Re-verified 2026-10-19 (0.0.12, Rust):** 0.0.12: builder `rust:1-slim` and runtime `distroless/cc-debian13:nonroot` pinned by digest; `USER 65532:65532`; only the two binaries, `Cargo.lock`, `LICENSE` and the notices reach the runtime stage; `cargo build --locked`; release profile with overflow checks and `panic = "abort"`. The release keeps multi-arch, cosign keyless signing, BuildKit provenance, the GitHub provenance attestation, the syft image SBOM and the digest-preserving `mirror-private`, and replaces the npm SBOM with per-binary Cargo SBOMs (F18). Not yet exercised on a release. Positive stands.
 
-**Re-verified 2026-10-20 (0.0.14):** No volume in the image or the pods; `ENV PORT=8080` only (no `DB_PATH`); the database CA is mounted at run time and the credentials arrive as a Secret, none baked in. The Dockerfile builds the API and the ingester in **two cargo invocations**, so the ingester's temporary `import-sqlite` feature never reaches the API binary (cargo unifies features within one build). A local podman build is 39 MB; `DOCKER=podman bash scripts/smoke.sh` passes against it with a real PostgreSQL (role separation, a second ingester refused, outage and recovery). Not run: the release workflow, cosign, Trivy. Positive stands.
+**Re-verified 2026-10-20 (0.0.14):** No volume in the image or the pods; `ENV PORT=8080` only (no `DB_PATH`); the database CA is mounted at run time and the credentials arrive as a Secret, none baked in. The Dockerfile built the API and the ingester in **two cargo invocations**, so the ingester's temporary `import-sqlite` feature never reached the API binary (cargo unifies features within one build; one invocation again since 0.0.15). A local podman build is 39 MB; `DOCKER=podman bash scripts/smoke.sh` passes against it with a real PostgreSQL (role separation, a second ingester refused, outage and recovery). Not run: the release workflow, cosign, Trivy. Positive stands.
+
+**Re-verified 2026-10-20 (0.0.15):** the Dockerfile has no `CARGO_FEATURES` argument any more: the dependency layer and the build compile the two binaries in two cargo invocations as before (measured: one joint build is 16 KB larger for `api` and 36 KB for `ingest`, from cargo unifying dependency features), with no feature argument, and `cargo about` runs without a feature flag. No SQLite is compiled or linked, and the licence notices drop the SQLite sentence of `about.hbs`. The image was not rebuilt in this session (no container build daemon); the CI `image` job and the smoke test build and run it. Positive stands.
 
 ### F15 — A stream whose cursor falls below the node's retention retried forever (found and fixed after the first pass)
 
@@ -1239,6 +1286,8 @@ build time; the Trivy image scan may read the shipped lockfile (not verified).
 **Re-verified 2026-10-19 (0.0.12, Rust):** The release now attests, next to the syft image SBOM (SPDX), one CycloneDX SBOM per binary from `cargo cyclonedx --no-build-deps --target x86_64-unknown-linux-gnu` (0.5.9, pinned through `taiki-e/install-action`). `scripts/check-sbom.sh` (bash + jq, no Node) fails unless each SBOM lists every crate reachable from the binary's package through normal (non-dev, non-build) edges of `cargo metadata --locked`, at its locked version; it runs in CI (`check` job, with its own 10-case test script) and in the release before `cosign attest --type cyclonedx`. Local run: `api` 63/63, `ingest` 139/139. Not yet exercised on a release (post-release check: `cosign verify-attestation --type cyclonedx`). Disposition unchanged (RESOLVED).
 
 **Re-verified 2026-10-20 (0.0.14):** The Cargo SBOM gate is feature-aware: `scripts/check-sbom.sh` takes `CARGO_FEATURES` and the workflows describe the ingester with `--features import-sqlite` (it links SQLite in the 0.0.14 image) and the API without (116 and 182 crates, both pass). *check-sbom-test.sh* gained the cases that the variable reaches `cargo metadata` (12 cases). Disposition unchanged (RESOLVED).
+
+**Re-verified 2026-10-20 (0.0.15):** the feature-aware gate is simplified back: the `CARGO_FEATURES` option of `scripts/check-sbom.sh` and both workflows' `--features import-sqlite` are removed (no binary has a feature any more). `api` lists all 116 crates, `ingest` all 175 (was 182 with `rusqlite`); *check-sbom-test.sh* has 11 cases (the stub-cargo case now asserts `--locked` and the release platform). Disposition unchanged (RESOLVED).
 
 ### F19 — The clients do not use the freshness fields the indexer now serves
 
@@ -1553,7 +1602,7 @@ the two pods, at the cheapest moment (17 testnet rows).
 - Per-role `CONNECTION LIMIT` 8 / 20 against `max_connections` 100 (the provisioner warns when the sum approaches the limit), `statement_timeout`
   60 s / 5 s, `idle_in_transaction_session_timeout`; the ingester uses **one** connection and the API's pool is bounded (F26).
 - The API connects lazily and answers `503 database unavailable`; its liveness is a TCP check, so a database outage causes no restart storm
-  (*a_database_that_cannot_be_reached_is_503_database_unavailable_and_recovers*; smoke step 9); it recovers by itself.
+  (*a_database_that_cannot_be_reached_is_503_database_unavailable_and_recovers*; smoke step 8); it recovers by itself.
 - The ingester exits non-zero when its connection (the writer lock) is lost and Kubernetes restarts it (*the_loop_stops_when_the_connection_carrying_the_writer_lock_is_lost*).
 - Cloudflare serves cached pages meanwhile (head 30 s, older pages immutable); clients fall back to the full node.
 - A bad migration of this service is bounded by the owner role (own database) and made reversible by the tier's dump; `bak_` schema copies precede a confirmed clear.
@@ -1567,15 +1616,14 @@ outage is the index's outage. Revisit with the CloudNativePG step (the tier READ
 **Severity:** Positive
 **Where:** `crates/store/src/writer.rs` (`Store::connect_with`, `WRITER_LOCK_KEY`); `crates/ingest/src/lib.rs` (`run_loop`).
 
-- The ingester (and the importer) take `pg_try_advisory_lock(WRITER_LOCK_KEY)` on their one connection and hold it for the life of the
+- The ingester takes `pg_try_advisory_lock(WRITER_LOCK_KEY)` on their one connection and hold it for the life of the
   process; another holder makes the start fail (after a 5 s grace for a predecessor's session still closing) with a message naming the
   writer lock and a non-zero exit. The lock is per database and per session: it vanishes with the connection, and the ingester treats a
   closed connection as fatal (`run_loop` returns `Err`, the process exits 1) rather than reconnecting into a state it cannot prove it owns.
 - This replaces "one process on one RWO volume" as the thing that keeps `events.id` in ledger order (F12). A second pod, a hand-run
-  importer, or a restarted pod overlapping its predecessor cannot interleave ids. The pod strategy stays `Recreate` as defence in depth.
+  tool, or a restarted pod overlapping its predecessor cannot interleave ids. The pod strategy stays `Recreate` as defence in depth.
 - Tests: *a_second_writer_is_refused_while_the_first_lives_and_admitted_after*, *the_writer_lock_is_visible_as_an_advisory_lock_of_the_owner_session*
-  (the lock row belongs to the owner role's backend), *start_refuses_a_second_ingester_while_one_is_running*, *cannot_run_while_an_ingester_holds_the_writer_lock*
-  (importer), *the_loop_stops_when_the_connection_carrying_the_writer_lock_is_lost*; smoke step 5 against the real image.
+  (the lock row belongs to the owner role's backend), *start_refuses_a_second_ingester_while_one_is_running*, *the_loop_stops_when_the_connection_carrying_the_writer_lock_is_lost*; smoke step 5 against the real image.
 - Residual: a network partition that leaves a stale backend holding the lock keeps the next start waiting out the server's detection (TCP
   keepalive 30 s idle is set on the client): it fails closed (a second writer is refused, never admitted). A superuser can still write
   (by design; the tier's superuser is not used by the service).
@@ -1586,7 +1634,7 @@ outage is the index's outage. Revisit with the CloudNativePG step (the tier READ
 **Where:** `crates/store/src/migrate.rs`, `crates/store/migrations/0001_init.sql`.
 
 - Versioned, embedded, ordered migrations recorded in `schema_migrations` with a SHA-256 of each file; **applied by the ingester as the owner
-  only**, each in its own transaction under `pg_advisory_xact_lock`, so two starts (or the importer) never apply the same one. A released
+  only**, each in its own transaction under `pg_advisory_xact_lock`, so two starts never apply the same one. A released
   migration edited afterwards is detected at the next start (checksum mismatch: refuses to run). A database migrated by a **newer** build is
   refused by an older ingester; the API accepts a newer schema (it needs `version >= SCHEMA_VERSION`).
 - **The API cannot migrate** (no DDL grant) and does not try: `/readyz` and `/v1` answer `503` until the schema is at its version and the
@@ -1600,27 +1648,34 @@ outage is the index's outage. Revisit with the CloudNativePG step (the tier READ
 
 ### F31 — The SQLite import path (temporary, 0.0.14 only)
 
-**Severity:** Low   **Disposition:** MITIGATED (verification before commit, an untouched legacy volume for rollback; the code leaves in 0.0.15 — Section D row)
-**Where:** `crates/store/src/import.rs`, `crates/ingest/src/import_cmd.rs` (feature `import-sqlite`), `crates/testkit/src/sqlite.rs`, `post-bootstrap/sui-indexer/migration/`.
+**Severity:** Low   **Disposition:** RESOLVED (0.0.15, 2026-10-20: the importer, its feature, `rusqlite` and the cutover tooling are removed; the import it served was verified before it committed and is reported done by the maintainer; commit pending)
+**Where (before 0.0.15):** `crates/store/src/import.rs`, `crates/ingest/src/import_cmd.rs` (feature `import-sqlite`), `crates/testkit/src/sqlite.rs`, `post-bootstrap/sui-indexer/migration/`.
 
-**Risk:** a one-off tool that reads a live database file and writes the index is a place for silent data loss (a wrong import looks like a healthy empty
+**Risk (0.0.14):** a one-off tool that reads a live database file and writes the index is a place for silent data loss (a wrong import looks like a healthy empty
 or partial index), it must preserve ids and the generation or every cached cursor breaks, it links SQLite C code into the ingester image for a release,
 and it runs with the owner's credentials.
 
-**Mitigations (verified):**
-- Reads the file **read-only** in one read transaction (a consistent snapshot, WAL included) after `PRAGMA quick_check`; the file is byte-identical afterwards (*reads_the_sqlite_file_without_changing_it*).
-- Writes in **one PostgreSQL transaction on the writer connection** (so it holds the writer lock and cannot overlap an ingester), into an **empty** target only: a target
-  with data is refused unless `--replace-existing`, which copies it to a `bak_<ms>` schema first.
-- Copies ids, generation, package bindings, gap notes, cursors and counters; moves the identity sequence past the largest id; **verifies before it commits** (row counts per
-  stream, every cursor, the commission total, the largest id, a SHA-256 over `id:tx_digest:event_index` in id order, the generation, the sequence, and a recount of the
-  counters) and rolls everything back on any difference (*a_verification_failure_rolls_everything_back*). Prints a report the runbook compares with the pre-cutover numbers.
-- **Output equals the SQLite API's:** the imported fixture answers 53 routes byte-identically to a real 0.0.13 binary (*the_imported_index_answers_like_the_sqlite_one*); the ingester continues the imported
-  index with the next id and old cursors page the same rows (*the_ingester_continues_the_imported_index_with_the_next_id_and_serves_old_cursors*).
-- Rollback: the legacy volume is never written; the runbook keeps off-cluster copies, a quiescent final copy, scale-to-zero before the import, and a day before deleting the volume.
-- The image builds the API without the feature (two cargo invocations); `cargo deny`/licences pass with it; the SBOM gate is per feature set (F18).
+**Mitigations while it existed (verified in 0.0.14):** it read the file read-only in one transaction after `PRAGMA quick_check`; wrote in one PostgreSQL transaction on the writer
+connection (so it held the writer lock) into an empty target only; copied ids, generation, package bindings, gap notes, cursors and counters; moved the identity sequence; and verified
+row counts, every cursor, the commission total, the largest id, a SHA-256 over `id:tx_digest:event_index` and a recount of the counters before it committed (*a_verification_failure_rolls_everything_back*).
+The fixture index answered 53 routes byte-identically to a real 0.0.13 binary. The image built the API without the feature.
 
-**Not done:** a rehearsal on the real PVC (no cluster access in this pass; the importer was exercised on a fixture built in the 0.0.13 format and on a database produced by
-the live-ingest run). **Removal:** 0.0.15 deletes the feature, `rusqlite`, the importer, the fixture builder, `tests/golden` and `migration/` (tracked in `OPERATOR_TASKS.md`).
+**Resolution (0.0.15):**
+- The cutover is done and settled on the maintainer's report: the legacy SQLite Deployment, the import Job, the old PVC, the legacy NetworkPolicies and the server backup of the old volume are
+  deleted. This review did not re-observe the cluster; `config/images.yaml` pins the 0.0.14 digest.
+- Code removed: the `import-sqlite` feature of all four crates, `ingest import-sqlite` (an unknown argument now exits 2: *unknown argument … (use --healthcheck or none)*), `crates/store/src/import.rs`,
+  `crates/ingest/src/import_cmd.rs`, `crates/testkit/src/sqlite.rs` and `seed-fixture sqlite`, the `client_mut`/`set_generation` hooks that only the importer used, `crates/ingest/tests/import_sqlite.rs` (9 tests),
+  `crates/api/tests/import_parity.rs` (1), `tests/golden/`, `scripts/golden-from-0.0.13.sh`. `Cargo.lock` loses `rusqlite`, `libsqlite3-sys` and `rsqlite-vfs`, `sqlite-wasm-rs`, `hashlink`,
+  `fallible-streaming-iterator`, `foldhash`, `hashbrown` 0.16 and `vcpkg` (checked: `cargo deny check` passes, every licence entry is still in use, no SQLite-only licence entry existed).
+- Pipeline removed: the Dockerfile `CARGO_FEATURES` argument, `--features import-sqlite` in `rust-ci.yml` and `docker-publish.yml` (clippy, tests, coverage, MSRV, the SBOM generation), the `CARGO_FEATURES` option of
+  `scripts/check-sbom.sh` and its test, the importer step of `scripts/smoke.sh`.
+- Workspace removed: `post-bootstrap/sui-indexer/migration/` (import Job, `import.sh`, `legacy/` manifests, runbook); `apply.sh` keeps only the first-apply check of the database Secrets and the CA.
+- The parity test is not carried over (see the Executive summary): its oracle was the SQLite API. The remaining tests pin the same wire contract (handler tests, client contract).
+- Not changed on purpose: `crates/store/migrations/0001_init.sql` still mentions the SQLite store in a comment; editing a released migration changes its SHA-256 and the ingester would refuse an
+  already migrated database (F30).
+
+Search 2026-10-20: `grep -rniE 'sqlite|import-sqlite|rusqlite|indexer\.db|DB_PATH|VACUUM|\bWAL\b' crates scripts .github Dockerfile Cargo.lock` has one match (the migration comment above); the remaining
+mentions in the docs are history (this audit's older sections and log, the CHANGELOG).
 
 ### F32 — Positive: TLS to the database is verified, secrets stay out of logs (0.0.14)
 
@@ -1667,7 +1722,7 @@ are rewritten; A44–A50 are new.
 | A13 | Least privilege at runtime | Dockerfile; manifests; the database roles (F27) | manifests rendered with `kubectl kustomize` 2026-10-20; image config; smoke test | HOLDS (non-root, read-only root FS, no volume, caps dropped, seccomp, no SA token, per-pod NetworkPolicy, per-pod database credentials) |
 | A14 | The node serves the configured network | `crates/ingest/src/{chain,lib}.rs` (`start`) | chain tests; *start_refuses_a_node_of_another_chain*; live start against testnet | HOLDS (F8, F16; the startup path is now tested) |
 | A15 | Operator-keyed lookups cannot resolve unintended entries | `config.rs`, `chain.rs` (exact-match slices) | *treats_network_as_data*, *has_no_inherited_entries* | HOLDS (F20) |
-| A16 | RUST — memory safety: `unsafe_code = "deny"` workspace-wide, no exception | `Cargo.toml` `[workspace.lints]`; the persisted-WAL FFI call of 0.0.12-0.0.13 is gone with SQLite | clippy (default and `--all-features`); `grep unsafe crates` finds none | HOLDS (0.0.14: no `unsafe` code at all) |
+| A16 | RUST — memory safety: `unsafe_code = "deny"` workspace-wide, no exception | `Cargo.toml` `[workspace.lints]`; the persisted-WAL FFI call of 0.0.12-0.0.13 is gone with SQLite | clippy (`--all-targets`; no feature set is left); `grep unsafe crates` finds none | HOLDS (0.0.14: no `unsafe` code at all) |
 | A17 | RUST — panics: none on attacker-reachable paths; release `overflow-checks = true`, `panic = "abort"` | request parsing validates before `parse()` (1–4 / 1–15 digits); indexing only after length checks; poisoned locks recovered with `into_inner` (the API's limiter and pool) | proptests (query parsing, page assembly); handler tests | HOLDS (the `expect`s are on startup, serialisation of owned structs and pre-validated digits) |
 | A18 | RUST — crypto-crate usage | none: no signatures, keys or MACs; TLS is rustls with the **ring** provider, for the gRPC client (webpki roots) and for PostgreSQL (`verify-full` against the tier's CA, F32) — one stack | — | N/A |
 | A19 | RUST — hand-rolled decoding: bounded, property-tested | the URL/query parser (`query.rs`) is the only hand-written parser; gRPC/protobuf is generated (prost, tonic 4 MiB message cap) | 6 proptests in `query.rs`, 1 in `tests.rs` (page assembly) | HOLDS |
@@ -1688,18 +1743,18 @@ are rewritten; A44–A50 are new.
 | A34 | IMG — runtime configuration inventory: image `ENV PORT=8080`; the Deployments set `NETWORK`, `POLL_MS`, `DATABASE_URL` (from the per-pod Secret), and for the API `PORT`, `DB_POOL_SIZE`, `RATE_LIMIT_*`; no `DB_PATH` | image `ENV`; manifests | image config; B.IMG-2 | HOLDS (the only secret is `DATABASE_URL`, never logged: F32) |
 | A35 | IMG — health and resources: `api` readiness `/readyz`, liveness TCP; `ingest` exec probe `--healthcheck` (database + heartbeat); per-pod requests and limits | manifests | B.IMG-2; smoke test | HOLDS (manifests rewritten 2026-10-20, not yet applied) |
 | A36 | IMG — scan before sign and verification command pinned to the workflow identity | `rust-ci.yml`, `docker-publish.yml` | F10, B.IMG-1 | HOLDS |
-| A37 | IMG — deployment pinned by digest from `config/images.yaml` | overlay; `verify-digests.sh`; `apply.sh` and `migration/import.sh` refuse the 0.0.13 and 0.0.11 digests | B.IMG-2; the scripts' dry-run | HOLDS (the overlay pins 0.0.13 until the maintainer pins 0.0.14 after publishing — Section D) |
+| A37 | IMG — deployment pinned by digest from `config/images.yaml` | overlay; `verify-digests.sh`; `config/images.yaml` is at 0.0.14; the old-digest refusal of `apply.sh` and `migration/import.sh` was removed in 0.0.15 with the SQLite era | B.IMG-2; `verify-digests.sh` | HOLDS (the overlay pins the 0.0.14 digest; the maintainer pins 0.0.15 after publishing — Section D) |
 | A38 | The API never writes and never creates anything in the database | the SELECT-only role (F27), `SET default_transaction_read_only = on` on every pooled connection, SELECT-only code | F22 tests; smoke steps 2 and 6 | HOLDS |
 | A39 | `/healthz` and `polledAt` reflect the ingester's real polls | heartbeat rows (`heartbeats poll:<stream>`) | F23 tests | HOLDS |
 | A40 | Stored `kind`/`gate_id`/`commission_mist` equal what the client parsers derive from the BCS | `decode.rs` | parity 19/19 on live testnet events (F24); fixture tests | HOLDS for the kinds seen live; the other kinds rest on the Move field names |
-| A41 | Data continuity across the storage move: ids, generation, package bindings, cursors and counters of the 0.0.13 SQLite index reproduce in PostgreSQL; cursor encoding unchanged; no reindex | `crates/store/src/import.rs`; `PageBuilder` | *imports_the_index_with_its_ids_generation_cursors_and_counters*; *the_imported_index_answers_like_the_sqlite_one* (53 routes byte-identical to a real 0.0.13 `api`); live parity 97 routes | HOLDS (cutover not yet run on the cluster: F31, Section D) |
-| A42 | The cutover is reversible: the legacy volume is never written; off-cluster copies are kept | the importer opens the file read-only; `migration/README.md` (backup, scale-to-zero, final copy, rollback) | *reads_the_sqlite_file_without_changing_it*; the runbook | HOLDS (runbook not yet exercised on the cluster) |
+| A41 | Data continuity across the storage move: ids, generation, package bindings, cursors and counters of the 0.0.13 SQLite index reproduce in PostgreSQL; cursor encoding unchanged; no reindex | (was `crates/store/src/import.rs`; `PageBuilder`) | (were *imports_the_index_with_its_ids_generation_cursors_and_counters*, *the_imported_index_answers_like_the_sqlite_one*, live parity 97 routes) | N/A since 0.0.15 (the move is done and the importer is deleted; the cursor encoding stays pinned by the `PageBuilder` and handler tests; the cutover is reported done by the maintainer, F31) |
+| A42 | The cutover is reversible: the legacy volume is never written; off-cluster copies are kept | (was the read-only importer and `migration/README.md`) | (was *reads_the_sqlite_file_without_changing_it*) | N/A since 0.0.15 (the legacy volume, the import Job and the backup of the old volume are deleted on the maintainer's instruction; no rollback to SQLite is intended or possible, F31) |
 | A43 | Request cost independent of history size for every query shape | counters (F1); indexes; custom plans on pooled connections | `EXPLAIN` plan and buffer-count tests; load test (17 rows and 300,000 give the same rate) | HOLDS since 0.0.13 (F25), re-verified on PostgreSQL 2026-10-20; it did not hold for rare-kind filters in 0.0.12 |
 | A44 | Only the owner role writes; the API role has no write, DDL or sequence-usage grant, and cannot read another service's database | `provision.sh` grants; `Reader` setup | F27 tests; smoke step 6 | HOLDS |
 | A45 | Exactly one writer, for the life of its connection; a lost connection stops the ingester | `pg_try_advisory_lock` (`writer.rs`); `run_loop` | F29 tests; smoke step 5 | HOLDS |
 | A46 | Migrations are versioned, checksummed, owner-only and race-free; the API serves only a schema at its version | `migrate.rs`; `Reader::check` | F30 tests | HOLDS |
 | A47 | TLS to the database is `verify-full` only; no secret in logs or errors | `db.rs`; `config.rs` | F32 tests | HOLDS |
-| A48 | An imported index equals its source (ids, order, counts, cursors, commission, counters) or nothing is committed | `import.rs` | F31 tests | HOLDS (temporary; removed in 0.0.15) |
+| A48 | An imported index equals its source (ids, order, counts, cursors, commission, counters) or nothing is committed | (was `import.rs`) | (were the F31 tests) | N/A since 0.0.15 (the importer is removed) |
 | A49 | Ids are ordered, not gapless; no ETag, cursor or paging logic assumes contiguity | `read.rs`, `handler.rs` | *ids_are_ordered_not_gapless_and_nothing_depends_on_contiguity* | HOLDS |
 | A50 | A pooled API connection is read-only, never holds an open transaction, and never uses a generic plan | `Reader` (one statement per request; `SESSION_SETUP`) | *a_cancelled_request_leaves_the_pool_usable*, *pooled_connections_start_read_only_…*, *pooled_connections_use_custom_plans_…* | HOLDS |
 
@@ -1720,7 +1775,6 @@ the security-relevant paths:
 | `tonic` / `prost` / `prost-types` | 0.14.6 / 0.14.4 | transport and decoding of node frames | 4 MiB default message cap |
 | `rustls` (via tonic `tls-ring`), `webpki-roots` | per lock | TLS to the full node | no OpenSSL in the image |
 | `hyper` / `hyper-util` | =1.12.0 / =0.1.21 | HTTP/1.1 server | header timeout, `max_buf_size` 32 KiB, graceful shutdown |
-| `rusqlite` (bundled `libsqlite3-sys`) | =0.40.2 | the database | SQLite compiled in; no system library |
 | `tokio` | =1.53.3 | runtime, timeouts, signals | |
 | `serde_json`, `base64`, `bs58`, `getrandom` | per lock | JSON, cursors and rows, chain ids, generations | |
 
@@ -1785,9 +1839,9 @@ vitest 5 majors per the workspace decisions.
 
 ### B.RS-1 Build & release (from 0.0.12)
 
-- `cargo fmt --check` and `cargo clippy --workspace --all-targets --locked -- -D warnings` (default features and
-  `--all-features`) in CI (`rust-ci.yml` `check`); the declared `rust-version` (1.88) is checked by the `msrv` job
-  (`cargo check --locked --workspace --all-targets --all-features` and, from 0.0.14, the tests, against PostgreSQL, on 1.88;
+- `cargo fmt --check` and `cargo clippy --workspace --all-targets --locked -- -D warnings` (there is no feature set beyond
+  the default) in CI (`rust-ci.yml` `check`); the declared `rust-version` (1.88) is checked by the `msrv` job
+  (`cargo check --locked --workspace --all-targets` and, from 0.0.14, the tests, against PostgreSQL, on 1.88;
   the check also run locally 2026-10-20: no new dependency raised the floor).
 - The image: B.IMG-1/2 (digest-pinned bases, nonroot 65532, signature, image SBOM plus per-binary Cargo SBOMs,
   provenance).
@@ -1843,7 +1897,7 @@ It was not re-run in this pass (cosign not installed).
 | Resources | `ingest` requests 10m / 32 Mi, limits 500m / 128 Mi; `api` requests 20m / 32 Mi, limits 500m / 128 Mi (measured RSS ≈ 6 / 10 MB, F25) |
 | Network | per-pod default-deny ingress; API: allow from `nginx-ingress` and `platform-probe` on 8080; ingester: nothing; the database namespace admits `app in (sui-indexer-ingest, sui-indexer-api)` of namespace `apps` on 5432 (`networkpolicy-consumers.yaml`); Ingress rate limit 20 r/s burst 80; no egress policy in `apps` |
 | Runtime env | `NETWORK=testnet`, `POLL_MS=15000`, `DATABASE_URL` (both); `PORT=8080`, `DB_POOL_SIZE=8`, `RATE_LIMIT_PER_SEC=10`, `RATE_LIMIT_BURST=40` (`api`); no `REINDEX_CONFIRM`, no `DB_PATH` |
-| Cutover | `migration/` (not discovered by `apply.sh`): the one-off import Job (old claim mounted read-only), `import.sh`, `legacy/` manifests, the runbook with rollback; `apply.sh` refuses the 0.0.13 digest, missing Secrets/CA, a running legacy Deployment, and a legacy volume without a successful import |
+| First apply | `apply.sh` refuses the first apply (no `sui-indexer-ingest` Deployment yet) while the two database Secrets or the `postgres-ca` ConfigMap are missing. The cutover tooling (`migration/`, the legacy-Deployment, legacy-volume and old-digest guards) was removed in 0.0.15 |
 | Not present | a PodDisruptionBudget (pointless for one replica on one node; the HA path names it); an egress NetworkPolicy; the cluster has not been touched |
 
 ### B.SC-1 ID-constant trace
@@ -1885,7 +1939,9 @@ non-canonical one is a `301` the client refuses, and a 100-event page stays unde
 
 ## Section C — Test-coverage & hermetic/live split
 
-### C.1 Coverage grade — A (0.0.14: 144 Rust tests, 154 with the importer, against a real PostgreSQL; 89.4% lines; the startup wiring is tested)
+### C.1 Coverage grade — A (0.0.15: 144 Rust tests against a real PostgreSQL; the startup wiring is tested)
+
+**2026-10-20 (0.0.15):** the 10 tests of the importer and the import parity are removed with the code they covered (144 remain: store 65, ingest 36, api 43, the same as the default run of 0.0.14); 5 contract tests, 11 SBOM-gate cases and the smoke test are unchanged in kind. Coverage: lines 89.2%, functions 88.4%, regions 89.4% (0.0.14: 89.4 / 89.1 / 87.3 with the importer).
 
 **2026-10-20 (0.0.14, PostgreSQL):** every database test creates its own database provisioned like production and runs the writer as the owner and the
 API as the SELECT-only role (`sui_indexer_store::testdb`); there is no mock. 144 tests (store 65, ingest 36, api 43), 154 with `--features import-sqlite`
@@ -1930,10 +1986,9 @@ from B because the first-pass error-path and boundary gaps (F1, F2, F6) are clos
 | --- | --- | --- |
 | Pure unit tests | `crates/store/src/{config,sui,time}.rs`, `crates/ingest/src/chain.rs`, `crates/api/src/{query,ratelimit}.rs` (incl. 6 proptests) | yes (`rust-ci.yml` `check`, reused by the release) |
 | Store / ingest / handler tests (a real PostgreSQL 18 with TLS, one database and the two production roles per test; scripted full node) | `crates/{store,ingest,api}/src/tests.rs`, `crates/store/src/index_tests.rs` (query plans), `crates/store/src/testdb.rs` (harness) (incl. 1 proptest) | yes (`REQUIRE_TEST_DATABASE=1`) |
-| Importer and import parity (feature `import-sqlite`) | `crates/ingest/tests/import_sqlite.rs` (9), `crates/api/tests/import_parity.rs` (1, 53 golden routes) | yes (`--all-features`) |
 | Local-socket integration | gRPC stub (`tonic` server) for `GrpcSource`; hyper server tests | yes |
 | Client contract (published TS clients against the built `api` binary, a seeded PostgreSQL, the API as the SELECT-only role) | `tests/contract/contract.test.ts` (5) | yes (`contract` job) |
-| SBOM gate | `scripts/tests/check-sbom-test.sh` (12 cases) and the real SBOMs (per binary and feature set) | yes (`check` job and the release) |
+| SBOM gate | `scripts/tests/check-sbom-test.sh` (11 cases) and the real SBOMs (per binary) | yes (`check` job and the release) |
 | Image smoke test (PostgreSQL with TLS, the ingester and the API as two containers, role separation, outage and recovery) | `scripts/smoke.sh` | yes (`image` job) |
 | Config and image scans | Trivy config scan, Trivy image scan | yes (CI, and on the published image before signing) |
 | Local run against testnet | README → Development (manual; done 2026-10-19 with the parity check) | no |
@@ -1948,7 +2003,7 @@ Every test project that exists runs in CI. Up to 0.0.11: one vitest project (52 
 | Startup chain-identity check and package binding | 0.0.12: yes (`start` tests with a scripted source) | live start of each release | F16 |
 | JSON renderings of kinds not yet seen on testnet | no (fixtures written from the Move sources) | the first such events: re-run the parity check | F24 |
 | Container runtime (nonroot, read-only root, probes, PostgreSQL over TLS) | smoke test covers nonroot, read-only root, `/readyz`, headers, the exec probe, the writer lock, the outage; probes and security context are read from the manifests (rendered, not applied) | cluster | F10, B.IMG-2 |
-| The cutover on the real PVC and the database tier on the cluster | no (fixture in the 0.0.13 format; the roles created by the real `provision.sh` on a local PostgreSQL) | the maintainer's cutover (`migration/README.md`) | F31, F28 |
+| The database tier on the cluster | no (the roles created by the real `provision.sh` on a local PostgreSQL); the cutover from SQLite is done and its tooling removed (0.0.15) | the cluster | F28 |
 | Cloudflare cache and rate rule | no | zone rate-limit rule not set (free plan, maintainer item in the infrastructure README) | F6 |
 | Ingest on real events of the new packages | partly (live: 11 `access-gate` events on 2026-10-19, 0 `sealed-content`) | first sealed-content publication on `0x0c8f7349…` | B.SC-1 |
 
@@ -1999,15 +2054,11 @@ Every test project that exists runs in CI. Up to 0.0.11: one vitest project (52 
   pages, `/healthz` 200 with both streams fresh, the `.bak-pre-rust-*` copy logged, treasury-ui and seal-ui
   list history, the status page's "Chain index" is green — maintainer item (release and cluster), D58.
   *2026-10-20: `config/images.yaml` pins 0.0.13; whether these post-rollout checks were done is not recorded here,
-  and the 0.0.14 cutover row below repeats the ones that still matter (events, generation, a pre-cutover cursor, `/healthz`, the consuming apps, the status page).*
-- [ ] **0.0.14 (PostgreSQL) released and cut over** — maintainer item (release and cluster), D59/D60, F27–F32: tag `v0.0.14` (CI green, including the PostgreSQL
-  tests, the contract job and the smoke test; signature and the three attestations verified), `config/images.yaml` at 0.0.14 with the consensus digest and
-  `sync-manifests.sh`; the database tier applied and provisioned (`OPERATOR_TASKS.md` "Database tier": Secrets, `service sui_indexer: ok`, a first backup);
-  then `post-bootstrap/sui-indexer/migration/README.md` steps 1-7: backups, the import report matching the pre-cutover numbers (events, generation
-  `e32e37afbbe9`, head id, commission, order hash), the new Deployments Ready, a pre-cutover cursor paging byte-identically, `/healthz` 200 with both streams fresh,
-  the API role refused a write, treasury-ui and seal-ui listing history, the status page's "Chain index" green, a clean day, then step 8 (clean-up)
-- [ ] **the SQLite importer removed (0.0.15)** after the cutover has settled: the `import-sqlite` feature, `rusqlite`, the importer, the fixture builder, `tests/golden`
-  and `migration/` deleted; the image rebuilt without SQLite and pinned — F31; tracked in `OPERATOR_TASKS.md` ("sui-indexer 0.0.15")
+  and the settled 0.0.14 cutover (ticked below) makes the live checks (events, generation, `/healthz`, the consuming apps, the status page) the maintainer's to confirm.*
+- [x] **0.0.14 (PostgreSQL) released and cut over** — D59/D60, F27–F32. Evidence: `config/images.yaml` pins the 0.0.14 digest `sha256:ed5f66b2…0566`; the maintainer reports (2026-10-20) that the cutover is done and settled and that the legacy SQLite
+  Deployment, the import Job, the old PVC, the legacy NetworkPolicies and the server backup of the old volume are deleted. Not re-observed by this review (no cluster access); the per-step checks of the former runbook (import report, pre-cutover cursor, `/healthz`,
+  consuming apps, status page) are therefore the maintainer's, not recorded here.
+- [x] **the SQLite importer removed (0.0.15)** — F31: the `import-sqlite` feature, `rusqlite`, the importer, the fixture builder, `tests/golden` and `migration/` are deleted (Executive summary, F31; commit pending); the 0.0.15 image is built and pinned by the maintainer's release (tag, `refresh-digests.sh`, `sync-manifests.sh`), which `OPERATOR_TASKS.md` tracks as "sui-indexer 0.0.15 release"
 
 ### pre-mainnet
 
@@ -2021,7 +2072,7 @@ Every test project that exists runs in CI. Up to 0.0.11: one vitest project (52 
 - [x] `noUncheckedIndexedAccess` enabled (F21) and the `Object.hasOwn` hygiene (F20) — 0.0.10, commit `4aab344`: flag on, `tsc` clean; `Map` lookups with tests
 - [ ] backup of the index with an offsite copy, and a restore drill that includes `sui_indexer` (F3, F28): the tier's `postgres-backup` CronJob covers the database
   once the tier is applied; the offsite copy (R2, encrypted to an offline key) is **not configured**, and until it is, losing the node loses the dump with the data —
-  maintainer item (`OPERATOR_TASKS.md` "Database tier" steps 4-5); supersedes the volume-snapshot row for `sui-indexer-data`, which no longer exists after the cutover
+  maintainer item (`OPERATOR_TASKS.md` "Database tier" steps 4-5); supersedes the volume-snapshot row for `sui-indexer-data`, which no longer exists
 - [ ] Cloudflare zone rate-limit rule (F6) — maintainer item (free plan)
 - [ ] external review — maintainer item
 - [x] chain-identity check on `GRPC_URL` — F8, F16 (0.0.6)
@@ -2090,7 +2141,7 @@ Every test project that exists runs in CI. Up to 0.0.11: one vitest project (52 
 8. MUST verify the database server's identity and MUST NOT log the connection URL or password — **holds** (F32: `verify-full` only; redacted settings).
 9. MUST apply schema changes only by versioned, checksummed migrations run by the owner, and the API MUST NOT serve a schema older than it needs — **holds** (F30).
 10. MUST keep ids ordered by ledger order and MUST NOT depend on their contiguity — **holds** (F12, A49).
-11. MUST NOT commit an import that does not verify against its source, and MUST remove the importer after the cutover — **holds** for the first part (F31); the removal is a Section D row (0.0.15).
+11. ~~MUST NOT commit an import that does not verify against its source, and MUST remove the importer after the cutover~~ — **met and closed** (F31): the importer verified before it committed, and it was removed in 0.0.15.
 
 6. MUST keep the API process unable to write the index (0.0.12) — **holds** (F22).
 7. MUST keep the stored columns equal to what the client parsers derive from the BCS — **holds** on every
@@ -2202,7 +2253,7 @@ The four first-pass questions and OQ5-OQ7 are decided (OQ6 was superseded by OQ7
    and an open mode (F22, F27); one backup, upgrade and restore story for all relational data (F3); independently schedulable pods and a stateless,
    replicable API instead of a two-container pod around one RWO file; the cheapest moment for the rewrite of `crates/store` (17 testnet rows, a contained change);
    the tier is a platform tier deployed independently of `ENABLE_AUTH`. Costs, accepted: shared fate with the auth PostgreSQL (F28), a network hop (4-5× lower origin
-   throughput per replica, immaterial behind the edge cache: F25), a one-off import (F31). Not claimed: durability — one node, MinIO on the same disk; only the offsite
+   throughput per replica, immaterial behind the edge cache: F25), a one-off import (F31, done and removed in 0.0.15). Not claimed: durability — one node, MinIO on the same disk; only the offsite
    copy is a backup (F3, Section D).
 
 ## Risks
@@ -2217,8 +2268,7 @@ The four first-pass questions and OQ5-OQ7 are decided (OQ6 was superseded by OQ7
   `npm audit`, Dependabot and the Trivy gate cover the lockfile and the base image (F4, F17).
 - **Upstream node trust:** a compromised full node can inject display rows (F8, display-only); from 0.0.12 it
   also renders the JSON the filter columns come from (F24).
-- **Cutover (0.0.14):** the manifests must not be applied before the 0.0.14 digest is pinned (the scripts refuse the old digests); the import must run before the new
-  ingester starts (the scripts refuse otherwise), and the legacy volume is the rollback (F31, `migration/README.md`). The runbook was not rehearsed on the cluster.
+- **Cutover (0.0.14):** done and settled (Section D); the legacy volume was the rollback and has been deleted on the maintainer's instruction, so there is no way back to SQLite (F31).
 - **Shared fate (F28):** an outage of the PostgreSQL tier is an outage of the index (display data; clients fall back). Durability rests on a dump on the same disk until the
   offsite copy exists (F3).
 - **Cutover (0.0.12, superseded):** the manifests must not be applied before the 0.0.12 digest is pinned; the
@@ -2228,6 +2278,16 @@ The four first-pass questions and OQ5-OQ7 are decided (OQ6 was superseded by OQ7
 ---
 
 ## Re-verification log
+
+- 2026-10-20 — `0.0.15`: the one-off SQLite importer and `rusqlite` removed (local commit on top of `eb8e46a`; not released). No behaviour change for the API.
+  - **Scope:** every file named in the Scope block; the repository was searched for `sqlite|import-sqlite|rusqlite|indexer.db|DB_PATH|VACUUM|WAL` and the workspace for `sqlite|indexer.db|import-sqlite|sui-indexer-data`.
+  - **Re-verified:** F31 → RESOLVED (evidence in the finding); F18 (SBOM gate: no feature option, 116 / 175 crates, 11 cases) and F14 (Dockerfile in one build step) carry a note; F29 and F30 lose the importer wording; A16, A37 reworded; A41, A42, A48 N/A; B.1 loses the `rusqlite` row;
+    B.IMG-2's "Cutover" row becomes "First apply"; C.1, the test layers and C.2 updated; Section D: the 0.0.14 cutover and the 0.0.15 removal rows ticked; normative requirement 11, OQ7's cost list and the Risks cutover bullet closed.
+  - **Found:** nothing new. `0001_init.sql` keeps one comment naming the SQLite store (a released migration is immutable: F30).
+  - **Not carried over:** the import-parity/golden test (its oracle was the SQLite API; the handler and client-contract tests remain the wire-contract pins).
+  - **Measured:** 144 Rust tests (store 65, ingest 36, api 43); `fmt`, `clippy -D warnings`, `cargo deny check` pass; MSRV 1.88: passes; 144 passed (store 65, ingest 36, api 43); MSRV 1.88 unchanged; SBOMs 116 / 175 crates, 11 + 9 gate cases; release binaries: release binaries: `api` 2,862,848 bytes (0.0.14: 2,847,120), `ingest` 4,327,128 bytes (0.0.14 with `rusqlite`: 6,414,464; -2.09 MB, -32.5%); built per binary as the Dockerfile does.
+  - **Totals F1-F32:** 17 RESOLVED, 2 MITIGATED (F2, F3), 3 ADJUDICATED, 1 ACCEPTED-RISK (F28), 1 DEFERRED (F19), 8 Positive (F12, F13, F14, F22, F27, F29, F30, F32).
+  - **Not run:** the GitHub workflows; the image build and smoke test (no container build daemon here); the client-contract job; the cluster.
 
 - 2026-10-20 — workspace-side database-tier hardening (no change in this repository's code).
   - **Authored and then applied on the cluster the same day:** `harden` of `kratos_db`, `hydra_db`, `keto_db` (closes the F27 residual
@@ -2373,3 +2433,5 @@ The four first-pass questions and OQ5-OQ7 are decided (OQ6 was superseded by OQ7
 - [x] 2026-10-20: C.1 counts measured (144 / 154 Rust tests, 5 contract, 12 SBOM-gate cases, coverage 89.4% lines); load figures labelled as a floor on a shared laptop.
 - [x] 2026-10-20: re-verification log entry added.
 - [x] 2026-10-20 (release workflow, D61): B.2 rows and the IMG supply-chain table updated; re-verification log entry added; no finding counts change.
+- [x] 2026-10-20 (0.0.15): finding header ↔ body: F31 RESOLVED in the header, the table and the body; Section A rows A41, A42, A48 N/A; Section D ↔ dispositions: the 0.0.14 cutover and the importer-removal rows ticked with evidence, no new unticked row; counts in the Status, the Executive summary and the findings table agree (17 / 2 / 3 / 1 / 1 / 8 for F1-F32).
+- [x] 2026-10-20 (0.0.15): C.1 counts measured (144 Rust tests, 11 SBOM-gate cases); re-verification log entry added.

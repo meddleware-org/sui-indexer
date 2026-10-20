@@ -349,9 +349,8 @@ async fn commission_totals_are_exact_beyond_64_bits() {
     assert!(s.verify_counters().await.unwrap().is_empty());
 }
 
-/// There is no counter backfill in the PostgreSQL schema (the SQLite store rebuilt counters for databases
-/// that predated them): every row enters through `ingest`, which maintains the counters in the same
-/// transaction, and the importer copies the old counters and re-checks them with this recount.
+/// There is no counter backfill in the PostgreSQL schema: every row enters through `ingest`, which
+/// maintains the counters in the same transaction; this recount is the check that they still match.
 #[tokio::test]
 async fn a_recount_detects_counters_that_do_not_match_the_rows() {
     let db = require_db!();

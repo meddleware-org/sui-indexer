@@ -117,8 +117,6 @@ jobs:
         with:
           tool: cargo-cyclonedx@0.5.9
 
-      # The ingester is described with the feature set the image is built with (the Dockerfile's CARGO_FEATURES: the
-      # temporary SQLite importer, in 0.0.14 only); the API is built without it. Remove the feature lines in 0.0.15.
       - name: Generate the SBOMs of the two binaries
         run: |
           cargo cyclonedx --manifest-path crates/api/Cargo.toml --format json --spec-version 1.5 \
@@ -126,9 +124,9 @@ jobs:
           cp crates/api/sui-indexer-api.cdx.json sbom.api.cdx.json
           bash scripts/check-sbom.sh sbom.api.cdx.json sui-indexer-api
           cargo cyclonedx --manifest-path crates/ingest/Cargo.toml --format json --spec-version 1.5 \
-            --no-build-deps --target x86_64-unknown-linux-gnu --features import-sqlite -q
+            --no-build-deps --target x86_64-unknown-linux-gnu -q
           cp crates/ingest/sui-indexer-ingest.cdx.json sbom.ingest.cdx.json
-          CARGO_FEATURES=sui-indexer-ingest/import-sqlite bash scripts/check-sbom.sh sbom.ingest.cdx.json sui-indexer-ingest
+          bash scripts/check-sbom.sh sbom.ingest.cdx.json sui-indexer-ingest
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

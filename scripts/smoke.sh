@@ -13,8 +13,7 @@
 #   - a second ingester is refused (single writer, advisory lock);
 #   - the API's role cannot write or change the schema, whatever the process does;
 #   - the API keeps serving when the ingester stops, answers 503 "database unavailable" while PostgreSQL is
-#     down, and recovers by itself when it returns;
-#   - (the 0.0.14 image) `ingest import-sqlite` exists and refuses a missing file.
+#     down, and recovers by itself when it returns.
 set -euo pipefail
 
 image="${1:?usage: smoke.sh <image>}"
@@ -137,23 +136,13 @@ for sql in "INSERT INTO meta (key, value) VALUES ('x', 'y')" "CREATE TABLE evil 
 done
 api_psql -c "SELECT count(*) FROM events" > /dev/null || { echo "the API role cannot read" >&2; exit 1; }
 
-# 7. The importer exists in the 0.0.14 image and refuses a missing file (nothing is written).
-if [ "${SMOKE_EXPECT_IMPORTER:-1}" = "1" ]; then
-  if imp="$("$docker" run --rm "${common[@]}" -e "DATABASE_URL=$(db_url sui_indexer_ingest "$ingest_pw")" "$image" /app/ingest import-sqlite /nonexistent.db 2>&1)"; then
-    echo "import-sqlite accepted a missing file" >&2
-    exit 1
-  fi
-  # (the running ingester holds the writer lock, so the importer is refused before it looks at the file)
-  grep -qE 'writer lock|is not a file' <<< "$imp" || { echo "import-sqlite: unexpected output: ${imp}" >&2; exit 1; }
-fi
-
-# 8. The API keeps serving after the ingester stops (its own crash domain), and the ingester exits cleanly.
+# 7. The API keeps serving after the ingester stops (its own crash domain), and the ingester exits cleanly.
 "$docker" stop -t 10 "$ingest" > /dev/null
 [ "$("$docker" inspect --format '{{.State.ExitCode}}' "$ingest")" = "0" ] || { echo "ingest did not stop cleanly on SIGTERM" >&2; exit 1; }
 [ "$(get /v1/localnet/coverage)" = "200" ] || { echo "the API stopped serving without the ingester: $(cat "$out")" >&2; exit 1; }
 [ "$(get /readyz)" = "200" ] || { echo "/readyz failed without the ingester" >&2; exit 1; }
 
-# 9. PostgreSQL goes away and comes back: the API says so (503, no internals) and recovers by itself.
+# 8. PostgreSQL goes away and comes back: the API says so (503, no internals) and recovers by itself.
 "$docker" stop -t 10 "$pgname" > /dev/null
 wait_for /v1/localnet/coverage 503
 grep -q 'database unavailable' "$out" || { echo "database down: unexpected body: $(cat "$out")" >&2; exit 1; }

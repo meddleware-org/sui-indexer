@@ -5,9 +5,6 @@
 //! seed-fixture seed <ADMIN_URL> [poll-age-ms]   create a database with the two production roles, seed the
 //!                                               fixtures and fresh heartbeats; print one JSON line
 //! seed-fixture drop <ADMIN_URL> <database>      drop the database and its roles
-//! seed-fixture sqlite <path>                    (with --features import-sqlite) write the 0.0.13-format
-//!                                               SQLite fixture the importer's tests and the golden
-//!                                               answers use
 //! ```
 //!
 //! `<ADMIN_URL>` is a superuser URL (`TEST_DATABASE_URL`). The JSON line carries the API role's
@@ -28,12 +25,6 @@ fn usage() -> ! {
 async fn main() {
     let mut args = std::env::args().skip(1);
     let (Some(cmd), Some(admin)) = (args.next(), args.next()) else { usage() };
-    #[cfg(feature = "import-sqlite")]
-    if cmd == "sqlite" {
-        let built = sui_indexer_testkit::sqlite::build(std::path::Path::new(&admin));
-        println!("wrote {admin}: {built:?}");
-        return;
-    }
     let admin = DatabaseSettings::parse(&admin, true).unwrap_or_else(|e| {
         eprintln!("{e}");
         std::process::exit(2);

@@ -54,16 +54,15 @@ A read-indexer for display data. See [README.md](README.md) for the API and conf
   - The invariant is **order, not gapless**: an `ON CONFLICT DO NOTHING` duplicate and a rolled-back page consume
     identity numbers. No code may read an id as a count (the ETag is `"<generation>-<newest id>"`, cursors are
     `<generation>.<id>`, counts come from the counters).
-  - Never insert rows out of order: no parallel backfill, no second writer, no descending reads into the table.
-    The importer is the one exception, and it inserts the old ids explicitly (`OVERRIDING SYSTEM VALUE`) into an
-    EMPTY table and moves the sequence past them.
+  - Never insert rows out of order: no parallel backfill, no second writer, no descending reads into the table,
+    no explicit ids (`OVERRIDING SYSTEM VALUE`).
 - **Cursor encoding.** The stored cursor is the base64 (standard, padded) of the full node's watermark
   cursor bytes, with the page semantics of `@mysten/sui`'s `core.listEvents` (`limit + 1` look-ahead,
   `SCAN_LIMIT`/`ITEM_LIMIT` resume from the frontier). Changing it orphans every stored cursor.
 - **Generation.** A new database gets a new random generation. Cursors carry it and are refused
   (`410`) across generations, so cached pages of an old database stay self-consistent.
-- **Schema identity.** `crates/store/migrations/0001_init.sql` is the logical schema of the SQLite store of
-  0.0.4-0.0.13 (tables, columns, meta keys, counter semantics) with PostgreSQL types and constraints: `bytea`,
+- **Schema identity.** `crates/store/migrations/0001_init.sql` is the schema (tables, columns, meta keys, counter
+  semantics) with PostgreSQL types and constraints: `bytea`,
   `bigint`, `numeric(39,0)` for commission totals, `NOT NULL` and `CHECK` where the code relies on them. The
   poll and liveness rows moved from `meta` to a `heartbeats` table (hot, heap-only updates). Migrations are
   versioned (`schema_migrations`, SHA-256 each), embedded, applied by the ingester as the owner under
@@ -92,7 +91,7 @@ A read-indexer for display data. See [README.md](README.md) for the API and conf
   `/healthz` reports each stream.
 - **Counters, not scans.** `stream_stats`, `gate_stats` and `gate_commission` are updated in the ingest
   transaction. There is no backfill (the schema is created with them and every row enters through `ingest`;
-  the importer copies and re-verifies the old ones, `Store::verify_counters` recounts). No request path may scan a
+  `Store::verify_counters` recounts). No request path may scan a
   stream for them, and a `kinds` page reads its own rows through `events_kind`.
 - **Canonical URLs.** Non-canonical spellings of a query get a cacheable `301`; the cache-busting
   protection is `400` for unknown parameters plus this.
@@ -106,7 +105,7 @@ A read-indexer for display data. See [README.md](README.md) for the API and conf
 - **Two Deployments, two roles, single writer.**
   - `ingest` is the only process that writes. It connects as the database OWNER (`sui_indexer_ingest`), applies
     migrations, and takes `pg_try_advisory_lock(WRITER_LOCK_KEY)` on its one connection for the life of the
-    process; a second writer (or the importer while an ingester runs) exits non-zero. A lost connection loses
+    process; a second writer exits non-zero. A lost connection loses
     the lock, so `run_loop` ends with an error and the process exits non-zero.
   - `api` connects as the `SELECT`-only role (`sui_indexer_api`: no write grant, `default_transaction_read_only`),
     each pooled connection additionally `SET default_transaction_read_only = on`. It never migrates, never
@@ -119,14 +118,10 @@ A read-indexer for display data. See [README.md](README.md) for the API and conf
   `sui_indexer_ingest` (owner) and `sui_indexer_api` (SELECT), provisioned by the database tier. Shared fate with
   the auth Postgres is accepted (display data degrades, authorisation does not: clients fall back to the full
   node); durability is the tier's backup (daily `pg_dump`; only the offsite copy is a backup on one node).
-- **The SQLite importer is temporary.** `ingest import-sqlite` (cargo feature `import-sqlite`, in the 0.0.14
-  image only) imports the 0.0.13 file once; 0.0.15 deletes the feature, `rusqlite`, `crates/store/src/import.rs`,
-  `crates/ingest/src/import_cmd.rs`, the testkit's `sqlite` module, `tests/golden` and the importer tests.
 - **Lean.**
   - Rust: `tokio-postgres` (+ `deadpool-postgres` for the API's pool, `tokio-postgres-rustls` on rustls with the
     **ring** provider the gRPC client already uses: one TLS stack), `hyper` + `hyper-util` (no web framework),
-    `sui-rpc` (Mysten's SDK) for gRPC, `serde_json`. No ORM, no async runtime beyond tokio. `rusqlite` only
-    behind `import-sqlite`.
+    `sui-rpc` (Mysten's SDK) for gRPC, `serde_json`. No ORM, no async runtime beyond tokio.
   - Distroless `cc` runtime, nonroot, no shell. Release profile: overflow checks on, `panic = "abort"`.
 
 ## Tests
@@ -135,7 +130,6 @@ A read-indexer for display data. See [README.md](README.md) for the API and conf
 starts a pinned TLS one, `DOCKER=podman` works). Each test creates its own database and the two production roles
 (`sui_indexer_store::testdb`), so the API's tests really run as the SELECT-only role. Without the variable they print
 `SKIPPED` and return; CI sets `REQUIRE_TEST_DATABASE=1` (a missing server fails) and fails on any ignored test.
-`cargo test --workspace --locked --all-features` adds the importer.
 
 - **store** — schema and constraints, atomic ingest, ids ordered-not-gapless, counters and their recount, package
   binding and the `bak_` backup (atomic with the clearing), migrations (once, racing migrators, checksum, newer
@@ -147,12 +141,10 @@ starts a pinned TLS one, `DOCKER=podman` works). Each test creates its own datab
 - **ingest** — JSON-derived columns, the poll loop against a scripted full node, gap recovery, page assembly from
   stream frames (with proptests), the real `sui-rpc` client against a local LedgerService stub, the startup wiring
   (chain check, a second ingester refused, package refusal and the `bak_` copy, the loop, a lost connection, the
-  healthcheck), and (feature) the importer: ids, generation, cursors and counters preserved, a non-empty target
-  refused, `--replace-existing`, rollback on a failed verification, the SQLite file untouched;
+  healthcheck);
 - **api** — every case of the 0.0.11 handler tests, URL parsing and canonicalisation (with proptests), the database
   lifecycle (`503` before the schema exists, the API creates nothing, `503 database unavailable` and recovery, a
-  server-closed connection, a timed-out request), the socket wiring, and (feature) the import parity: 53 routes
-  byte-identical to a real 0.0.13 API (`tests/golden`);
+  server-closed connection, a timed-out request), the socket wiring;
 - **config, chain ids and the rate limiter.**
 
 CI also runs the **client contract** (`tests/contract`: the published client packages against the built `api`
