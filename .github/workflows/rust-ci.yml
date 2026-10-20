@@ -56,7 +56,7 @@ jobs:
           cargo test --workspace --locked --all-features 2>&1 | tee -a test.log
           if grep -E '[1-9][0-9]* ignored' test.log; then echo "::error::a test was ignored"; exit 1; fi
           if grep -E 'SKIPPED' test.log; then echo "::error::a database test was skipped"; exit 1; fi
-          echo "tests run: $(grep -E '^test result' test.log | sed -E 's/.* ([0-9]+) passed.*/\1/' | paste -sd+ | bc)"
+          echo "tests run: $(grep -E '^test result' test.log | awk '{ n += $4 } END { print n }')"
 
       # Coverage figure (RUST lens): printed to the job summary; informational, not a gate.
       - name: Install cargo-llvm-cov and cargo-cyclonedx
