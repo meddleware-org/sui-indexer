@@ -638,7 +638,7 @@ async fn an_events_response_is_one_snapshot_of_the_head_and_the_page() {
                 let snap = r.events(Stream::AccessGate, &PageQuery { limit: 5, ..Default::default() }).await.unwrap();
                 if let Some(first) = snap.page.rows.first() {
                     assert_eq!(snap.head_id, first.id, "the head id and the page must come from one snapshot");
-                    assert_eq!(snap.coverage.events as usize >= snap.page.rows.len(), true);
+                    assert!(snap.coverage.events as usize >= snap.page.rows.len());
                     // The counters are in the same snapshot as the rows they count.
                     let n = snap.coverage.events;
                     assert!(n >= 1);

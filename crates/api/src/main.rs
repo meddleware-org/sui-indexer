@@ -15,7 +15,7 @@ fn main() -> ExitCode {
         }
     };
     // Worker threads follow the CPUs the container may use (cgroup quota aware), at most 4: each
-    // request is a few sub-millisecond SQLite reads.
+    // request is one small indexed read.
     let workers = std::thread::available_parallelism().map_or(1, |n| n.get()).min(4);
     let rt = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(workers)

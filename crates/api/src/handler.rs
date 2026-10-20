@@ -274,7 +274,7 @@ fn events_response(req: &ApiRequest<'_>, before_id: Option<i64>, snap: EventsSna
         headers.push(("ETag", etag));
         return ApiResponse { status: 304, headers, body: String::new() };
     }
-    let polled = head.then(|| if snap.poll.last_success_at == 0 { None } else { Some(snap.poll.last_success_at) });
+    let polled = head.then_some(if snap.poll.last_success_at == 0 { None } else { Some(snap.poll.last_success_at) });
     let body = EventsPage {
         events: snap.page.rows.iter().map(serialize_row).collect(),
         cursor: snap.page.next.map(|n| format!("{generation}.{n}")),
