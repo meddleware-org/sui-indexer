@@ -1876,7 +1876,7 @@ Every test project that exists runs in CI. Up to 0.0.11: one vitest project (52 
 
 ## Open questions (`OQ#`)
 
-The four first-pass questions and OQ5 are decided.
+The four first-pass questions, OQ5 and OQ6 are decided.
 
 1. **OQ1** F3 — decided: a fresh publish clears the old package's rows after a `VACUUM INTO` backup;
    history is not kept queryable per package; deletion requires `REINDEX_CONFIRM` naming the stream.
@@ -1890,6 +1890,13 @@ The four first-pass questions and OQ5 are decided.
    pure language change. The index is additive and rollback-safe, and the ingester creates it at startup
    (about 0.5 s on 300,000 rows, readers unaffected). Options (a) (in the cutover) and (c) (not at all, relying on
    the edge cache and the limiter; the cost grows with history) were not taken.
+6. **OQ6** storage layer — decided 2026-10-20 (workspace D59): the index stays in the indexer's own embedded SQLite on its
+   PVC and is not moved into the shared PostgreSQL of the `database` namespace. That PostgreSQL is a single replica for the
+   Ory auth stack (ingress only from `auth`, only deployed with `ENABLE_AUTH=true`, same single-replica Longhorn storage,
+   no backup), so it would add no durability, couple the chain index to the auth stack, need a role/TLS/secret and a rewrite
+   of `crates/store`, and put a network hop in front of a display-only cache. The gap is backup (F3, `OPERATOR_TASKS.md`),
+   not the engine. Revisit for 2+ API replicas on the 3-node cluster or a shared HA PostgreSQL with PITR; the swap is
+   contained in `crates/store`.
 
 ## Risks
 
@@ -1910,6 +1917,8 @@ The four first-pass questions and OQ5 are decided.
 ---
 
 ## Re-verification log
+
+- 2026-10-20 — OQ6 decided: the indexer keeps its embedded SQLite rather than the shared `database` namespace (workspace D59).
 
 - 2026-10-19 — F25 closed in `0.0.13` (local commit on top of the 0.0.12 commits; not released, not deployed).
   - **Fixed:** F25 → RESOLVED: `events_kind (stream, kind, id)` (ingester-created, additive) and a page query

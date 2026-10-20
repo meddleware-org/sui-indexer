@@ -96,6 +96,9 @@ A read-indexer for display data. See [README.md](README.md) for the API and conf
   - The writer keeps the `-wal`/`-shm` files on close (`SQLITE_FCNTL_PERSIST_WAL`), so the read-only API
     can open the database while the ingester is stopped. That one FFI call is the only `unsafe` code.
   - One replica with an RWO volume; both containers in one pod.
+- **Storage is embedded SQLite, deliberately.** Not the shared PostgreSQL of the `database` namespace (D59, OQ6): that is one
+  replica for the auth stack with no backup, so it adds no durability and couples this display-only index to auth. All SQL
+  stays in `crates/store`, so a later move (2+ API replicas, or a shared HA PostgreSQL with PITR) is contained there.
 - **Lean.**
   - Rust: `rusqlite` (bundled SQLite), `hyper` + `hyper-util` (no web framework), `sui-rpc` (Mysten's
     SDK) for gRPC, `serde_json`. No ORM, no async runtime beyond tokio.
