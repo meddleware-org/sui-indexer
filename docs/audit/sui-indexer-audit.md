@@ -439,7 +439,7 @@ configuration and the cluster platform (platform lens).
 | `cargo test --workspace --locked` | **144 passed** (store 65, ingest 36, api 43), 0 ignored, 0 skipped |
 | `cargo test --workspace --locked --all-features` | **154 passed** (+ importer 9, import parity 1) |
 | `cargo llvm-cov --workspace --locked --all-features --summary-only` | lines 89.4%, functions 89.1%, regions 87.3% |
-| `cargo +1.88 check --locked --workspace --all-targets --all-features` | passes (MSRV 1.88 unchanged: no new dependency raised it) |
+| `cargo +1.88 check --locked --workspace --all-targets --all-features`; `cargo +1.88 test --workspace --locked --all-features` | passes; 154 passed (MSRV 1.88 unchanged: no new dependency raised it) |
 | `cargo deny check` (0.20.2) | advisories ok, bans ok (duplicates warned: `base64`, `block-buffer`, `const-oid`, `crypto-common`, `digest`, `getrandom`, `syn`), licenses ok, sources ok |
 | `cargo cyclonedx` + `scripts/check-sbom.sh` | `api` SBOM lists all 116 crates of its graph; `ingest` (with `--features import-sqlite`) all 182; `check-sbom-test.sh` 12 cases pass |
 | `tests/contract` (Node 26.12, `@meddleware/access-gate-client` 0.0.9, `@meddleware/seal-client` 0.0.20) | 5 passed against `target/release/api`, a seeded database, the API as the SELECT-only role |
