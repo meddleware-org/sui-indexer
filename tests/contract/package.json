@@ -14,7 +14,7 @@
   "devDependencies": {
     "@meddleware/access-gate-client": "0.0.9",
     "@meddleware/seal-client": "0.0.20",
-    "@mysten/sui": "2.36.0",
+    "@mysten/sui": "2.37.0",
     "vitest": "5.0.5"
   }
 }
