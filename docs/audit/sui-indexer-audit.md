@@ -130,10 +130,10 @@ the index; the offsite copy is operator work and not configured). Totals for F1�
 crates only they pulled in, the importer and parity tests, the SQLite fixture builder, `tests/golden`, `migration/` and the legacy manifests are gone (evidence in F31).
 A41, A42 and A48 are N/A (the data moved and the importer no longer exists); the Section D rows for the 0.0.14 cutover and the 0.0.15 removal are ticked. Totals for F1–F32:
 17 RESOLVED, 2 MITIGATED (F2, F3), 3 ADJUDICATED, 1 ACCEPTED-RISK (F28), 1 DEFERRED (F19, a client change), 8 Positive (F12, F13, F14, F22, F27, F29, F30, F32).
-**2026-10-20 (clients, F19; no change in this repo):** F19 is RESOLVED in access-gate-client 0.0.10 and seal-client 0.0.21 (local commits, not yet released): a head page whose `polledAt` is
+**2026-10-20 (clients, F19; no change in this repo):** F19 is RESOLVED in access-gate-client 0.0.10 and seal-client 0.0.21 (local commits at the time; both released since: tags `v0.0.10` and `v0.0.21`, npm `latest`, read 2026-10-22): a head page whose `polledAt` is
 missing, null or older than 60 s is treated as unavailable and the node fallback runs (evidence in F19). F2 follows to RESOLVED and the Section D row *clients treat a stale head page as
 unavailable* is ticked. Totals for F1–F32: 19 RESOLVED, 1 MITIGATED (F3), 3 ADJUDICATED, 1 ACCEPTED-RISK (F28), 0 DEFERRED, 8 Positive (F12, F13, F14, F22, F27, F29, F30, F32).
-The apps (treasury-ui, seal-ui) get the behaviour when they take the two client releases.
+The apps (treasury-ui, seal-ui) get the behaviour when they take the two client releases (done 2026-10-22: treasury-ui 0.0.19, dao-ui 0.1.35, seal-ui 0.0.40, walrus-ui 0.1.61, token-deployer-ui 0.0.38; the dashboard embeds them in 0.1.88).
 
 **Front matter (RUST lens, from 0.0.12):**
 
@@ -668,7 +668,7 @@ First-pass commands (2026-10-03, Node 22.22.2) are recorded in the re-verificati
 
 **Re-verified 2026-10-20 (0.0.14):** The heartbeats are rows of a new `heartbeats` table (`poll:<stream>`, `ingest:alive`; they were `meta` rows, moved because they are rewritten many times a minute: `fillfactor 50`, so updates stay heap-only), written by the ingester after each poll and read by `/healthz` in one statement (`Reader::polls`); the JSON and the 5 × `POLL_MS` rule are unchanged. New: with PostgreSQL unreachable, `/healthz` is `503` with every stream `ok: false` and `lastError: "database unavailable"` (the cause is logged, not sent). Tests: *polls_the_streams_independently_and_health_names_the_failing_one*, *heartbeats_round_trip*, *a_database_that_cannot_be_reached_is_503_database_unavailable_and_recovers*. Disposition unchanged at the time (MITIGATED; the clients' use of `polledAt` was F19).
 
-**Re-verified 2026-10-20 (clients):** F19 is RESOLVED (access-gate-client 0.0.10, seal-client 0.0.21; local commits, not yet released), which was the one remaining item: a stuck ingest that still answers `200` is now detected by the clients through `polledAt` and the full node answers. Disposition moved to RESOLVED. Nothing in this repository changed; the API contract that the clients rely on (head pages only, `polledAt` an epoch-ms integer or `null` before the first poll) is pinned by *head pages say how fresh the index is; older pages stay immutable and free of it* and the `polledAt` is-null-before-any-poll assertion in `crates/api/src/tests.rs`.
+**Re-verified 2026-10-20 (clients):** F19 is RESOLVED (access-gate-client 0.0.10, seal-client 0.0.21; released, see Deployment status), which was the one remaining item: a stuck ingest that still answers `200` is now detected by the clients through `polledAt` and the full node answers. Disposition moved to RESOLVED. Nothing in this repository changed; the API contract that the clients rely on (head pages only, `polledAt` an epoch-ms integer or `null` before the first poll) is pinned by *head pages say how fresh the index is; older pages stay immutable and free of it* and the `polledAt` is-null-before-any-poll assertion in `crates/api/src/tests.rs`.
 
 ### F3 — Clearing a stream permanently loses history the full node has pruned
 
@@ -2093,7 +2093,7 @@ Every test project that exists runs in CI. Up to 0.0.11: one vitest project (52 
   confirmed on the released 0.0.10 digest, 2026-10-18: two SPDX attestations (image SBOM, 17 packages; npm packages SBOM, 24 packages) verified with `cosign verify-attestation --type spdxjson`
 - [x] clients treat a stale head page as unavailable — F19 (2026-10-20): `readIndexerEvents` in access-gate-client 0.0.10 (shared by seal-client 0.0.21)
   throws for a head page whose `polledAt` is missing, null or older than 60 s, so the node fallback runs; the future is tolerated up to 5 min; older pages are not
-  checked; per-client tests named in F19. Local commits; released with the maintainer's tags, and the apps take it with their next bump
+  checked; per-client tests named in F19. Released (access-gate-client `v0.0.10`, seal-client `v0.0.21`); the apps took it by 2026-10-22
 - [ ] a mainnet deployment recorded in both clients (startup otherwise throws by design); then
   `NETWORK=mainnet` with the recorded chain id `35834a8a` — mainnet-blocked (access-gate-sui and
   seal-policies-sui publication, `OPERATOR_TASKS.md` "Mainnet release custody")
