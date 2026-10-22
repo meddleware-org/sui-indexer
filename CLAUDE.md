@@ -41,6 +41,8 @@ A read-indexer for display data. See [README.md](README.md) for the API and conf
     `AccessBurned`, `GateFrozen`, `GateMadeFree` or `PlatformConfigUpdated` event exists on testnet for
     these packages; for them the field names come from the Move sources (the node's rendering uses Move
     field names, as the verified kinds show).
+  - **Parity re-run 2026-10-22:** all nine kinds, 43 events, identical to the client parsers' decoding of the BCS and to the node's `json`
+    (34 access_gate events and 2 pointers on the live index; 7 on a scratch publication for `GateMadeFree` and `PlatformMigrated`). See the audit, F24.
   - A recognised event whose rendering lacks the field (or has no BCS or position) is **undecodable**:
     counted in `stream_stats.undecodable`, logged, skipped. A commission above 63 bits is undecodable
     too (the column is a `bigint`; commission is at most 10% of a `u64` price).

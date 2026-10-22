@@ -1492,8 +1492,26 @@ becomes a second input that must agree with the BCS.
   what is served: the BCS is the node's, and the clients re-decode and type-check it (display-only, F8).
 - Lost by design: 0.0.11's strict re-encode check (a layout drift made the event undecodable at ingest).
   Drift is now caught where the BCS is decoded — in the clients, which skip and count invalid rows.
-- Revisit: when the first sealed-content or gate-lifecycle events appear on testnet, re-run the parity
-  check (Section D, pre-mainnet).
+- **Parity re-run 2026-10-22 (read-only on the index; the events were produced for it on testnet):**
+  - The oracle is now the published client parsers (`@meddleware/access-gate-client` 0.0.10, `@meddleware/seal-client` 0.0.22), since the TypeScript path is gone. For
+    every event the live index serves (`https://sui-indexer.meddleware.co.uk`, 0.0.16, PostgreSQL): decode the stored `bcs` with the parser; compare
+    (kind, gate, commission) with (a) the full node's own `json` rendering of the same event (fetched per transaction), and (b) what the API derived: the `kinds`
+    filter for each of the eight kinds, the `gate` filter for each gate, each `gate` x `kinds` pair, `/gates/{id}/stats` (minted, consumed, burned, commission sum) and
+    `/coverage` (counts, `undecodable: 0`, `gaps: 0`).
+  - Live index: **34 of 34** access_gate events identical (GateCreated 5, AccessMinted 12, AccessConsumed 11, AccessBurned 2, GateFrozen 2, PlatformConfigUpdated 2), all 5 gates'
+    filters and stats, and **2 of 2** `SealedContentPublished` (JSON `gate_id`, `content_id`, `blob_id`, `label` equal to the BCS; one label of 216 bytes with multi-byte characters).
+    Produced for this (all from the maintenance runner): four gates on the live `access_gate` (`DyXgvm3kXkXz6uNMkaEJEKVJv78d6DuCTm71wJEoYH4D`, `Di4fqzfL37QjpV6S7KDJczQZpckn5MEWSbUFms7kHJtK`,
+    `7hVyPZswbwRTCK8zoXJgPrce74TScCcP2fnnMhKY8HPS`, `5WJJzJj7en5xsm3mmgufj3Xe2EhR7PPnNhs4KKxDTiDS`); a pass bought (`D2Y9hXbdBFThHucnoVsyZdp1AHb9YFZqoVCYom1eJzMm`) and consumed with
+    auto-burn (`9HUHrovpDg6nxbKrbLSvhYYFw6bjKQ3ukTXKiwSLGZfH`); a pass bought (`63R932YmkpUNkq9nVBetuXGvfrjrcJyvcwbMEyFYSJJw`) and burned by its holder (`FwHiThQyofTj8q6jTRqvLGcXbm7kt9fWUJjjSrdpBLEt`);
+    two gates frozen (`DvZH7fCH36RAqKekQYn49m1HZFz3djgg8xyLCYBtfTRp` with `lock_commission_on_freeze`, so `locked_commission` is `Some`; `37cpBDc5wmKwKtndNiiDfdkiiSFNQTxZBrHbxUE7RsQX` with `None`); two
+    sealed-content pointers (`6YKZAh9YfE8HD2tp6bhXAAtLHdcpoMao1U7y57FkXvny`, `EiDAyRptgqSgWZTCh7FfHvXZAtvw6ugz4cycMFegRqWs`).
+  - **`GateMadeFree` and `PlatformMigrated`** cannot be produced on the live package without its admin keys or a 1 SUI fee (`free_gate_fee_mist` is 1,000,000,000 on the live `PlatformConfig`; `PlatformMigrated` needs the
+    `PlatformAdminCap` at `0xa991…`). They were produced on a **scratch publication** of the same source (`0x47fdd6f8…11ce`, the access-gate-sui custody rehearsal of the same day) and ingested by a **local** 0.0.16 `ingest` + `api`
+    (PostgreSQL 18 from `scripts/test-postgres.sh`, `ACCESS_GATE_ORIGINAL_ID` set to the scratch id, the public full node): **7 of 7** identical, one of each of GateCreated, AccessMinted, AccessConsumed, GateFrozen, GateMadeFree
+    (`3cJb3jJ9H7wo6Ff525F49m5nmkmddBAQNCxdX9e7XKLe`), PlatformConfigUpdated (`HsFd7wypsce34vKWeozUzK1ttrXNsVK94UereKRKvUPT`) and PlatformMigrated (`BEMeJ7oCX2SzvYfn3gmcsaKLxYU8YQdMcYcWD9rfrYLr`); `undecodable: 0`. The two
+    live-only kinds are therefore checked on a real chain, but not on the deployed index.
+  - `PlatformConfigUpdated` and `PlatformMigrated` carry no gate or commission by design (gate `NULL`): the API's `gate` filters returned none of them, and their `kinds` filters returned exactly the decoded ones.
+  - **Findings: none.** No divergence between the rendering and the BCS was found in 43 events (34 + 7 + 2). The Section D gate is closed; the check is repeated whenever a Move event changes or a new kind appears.
 
 **Re-verified 2026-10-20 (0.0.14):** `decode.rs` is unchanged. `commission_mist` is now a `bigint` with `CHECK (commission_mist >= 0)`, so the 63-bit rule is also enforced by the column (an out-of-range value was already undecodable before it reached a statement). Live check: the 17 events of the current `access_gate` package ingested by 0.0.14 from `fullnode.testnet.sui.io` equal the rows the live 0.0.13 instance serves (97 routes byte-identical, F13). Disposition unchanged (ADJUDICATED).
 
@@ -1776,7 +1794,7 @@ are rewritten; A44–A50 are new.
 | A37 | IMG — deployment pinned by digest from `config/images.yaml` | overlay; `verify-digests.sh`; `config/images.yaml` is at 0.0.14; the old-digest refusal of `apply.sh` and `migration/import.sh` was removed in 0.0.15 with the SQLite era | B.IMG-2; `verify-digests.sh` | HOLDS (the overlay pins the 0.0.14 digest; the maintainer pins 0.0.15 after publishing — Section D) |
 | A38 | The API never writes and never creates anything in the database | the SELECT-only role (F27), `SET default_transaction_read_only = on` on every pooled connection, SELECT-only code | F22 tests; smoke steps 2 and 6 | HOLDS |
 | A39 | `/healthz` and `polledAt` reflect the ingester's real polls | heartbeat rows (`heartbeats poll:<stream>`) | F23 tests | HOLDS |
-| A40 | Stored `kind`/`gate_id`/`commission_mist` equal what the client parsers derive from the BCS | `decode.rs` | parity 19/19 on live testnet events (F24); fixture tests | HOLDS for the kinds seen live; the other kinds rest on the Move field names |
+| A40 | Stored `kind`/`gate_id`/`commission_mist` equal what the client parsers derive from the BCS | `decode.rs` | parity 19/19 (2026-10-19) and 43/43 (2026-10-22, every kind) on real testnet events (F24); fixture tests | HOLDS |
 | A41 | Data continuity across the storage move: ids, generation, package bindings, cursors and counters of the 0.0.13 SQLite index reproduce in PostgreSQL; cursor encoding unchanged; no reindex | (was `crates/store/src/import.rs`; `PageBuilder`) | (were *imports_the_index_with_its_ids_generation_cursors_and_counters*, *the_imported_index_answers_like_the_sqlite_one*, live parity 97 routes) | N/A since 0.0.15 (the move is done and the importer is deleted; the cursor encoding stays pinned by the `PageBuilder` and handler tests; the cutover is reported done by the maintainer, F31) |
 | A42 | The cutover is reversible: the legacy volume is never written; off-cluster copies are kept | (was the read-only importer and `migration/README.md`) | (was *reads_the_sqlite_file_without_changing_it*) | N/A since 0.0.15 (the legacy volume, the import Job and the backup of the old volume are deleted on the maintainer's instruction; no rollback to SQLite is intended or possible, F31) |
 | A43 | Request cost independent of history size for every query shape | counters (F1); indexes; custom plans on pooled connections | `EXPLAIN` plan and buffer-count tests; load test (17 rows and 300,000 give the same rate) | HOLDS since 0.0.13 (F25), re-verified on PostgreSQL 2026-10-20; it did not hold for rare-kind filters in 0.0.12 |
@@ -1956,7 +1974,7 @@ Single implementation in service. The 2026-10-19 cutover was checked against the
 
 | Behaviour | 0.0.11 (TS) | 0.0.12 (Rust) | Evidence |
 | --- | --- | --- | --- |
-| Stored `kind`, `gate_id`, `commission_mist` | client parsers on the BCS | type name + node JSON | 19/19 identical on live testnet events (F24) |
+| Stored `kind`, `gate_id`, `commission_mist` | client parsers on the BCS | type name + node JSON | 19/19 identical on live testnet events (F24); 43/43 on 2026-10-22 across all nine kinds |
 | Stored cursor for a page | `core.listEvents` `endCursor` | `PageBuilder` | same value (`KAFCDginh429ARDNzazFDxgA`) for the same page |
 | API responses | `api.ts` | `handler.rs` | byte-identical for 10 routes and 6 error/redirect cases against the live instance |
 | Client reading | through the handler (vitest) | through the binary over HTTP (`contract` job) | 5 contract tests with the published clients |
@@ -2031,7 +2049,7 @@ Every test project that exists runs in CI. Up to 0.0.11: one vitest project (52 
 | --- | --- | --- | --- |
 | gRPC `ListEvents` semantics (ordering, cursors, timeout) | 0.0.12: scripted source, frame proptest, local LedgerService stub with the real client; cursor equality with `@mysten/sui` checked live once | manual testnet run before a release | F9, F12 |
 | Startup chain-identity check and package binding | 0.0.12: yes (`start` tests with a scripted source) | live start of each release | F16 |
-| JSON renderings of kinds not yet seen on testnet | no (fixtures written from the Move sources) | the first such events: re-run the parity check | F24 |
+| JSON renderings of kinds not yet seen on testnet | no (fixtures written from the Move sources) | **done 2026-10-22:** all nine kinds checked against the client parsers on real events (seven of them on the deployed index, `GateMadeFree` and `PlatformMigrated` on a scratch publication through a local ingester); repeat when a Move event changes | F24 |
 | Container runtime (nonroot, read-only root, probes, PostgreSQL over TLS) | smoke test covers nonroot, read-only root, `/readyz`, headers, the exec probe, the writer lock, the outage; probes and security context are read from the manifests (rendered, not applied) | cluster | F10, B.IMG-2 |
 | The database tier on the cluster | no (the roles created by the real `provision.sh` on a local PostgreSQL); the cutover from SQLite is done and its tooling removed (0.0.15) | the cluster | F28 |
 | Cloudflare cache and rate rule | no | none needed (decided 2026-10-22: the Ingress per-IP limit and the edge cache bound it) | F6 |
@@ -2115,8 +2133,8 @@ Every test project that exists runs in CI. Up to 0.0.11: one vitest project (52 
 - [x] image per the IMG lens; crates.io trusted publishing — IMG rows A31–A37; no crates are published (N/A)
 - [x] rare-kind `kinds` filters bounded — F25, OQ5: `events_kind (stream, kind, id)` created by the ingester,
   one seek per kind; query-plan and page-cost tests; 8 → ≈ 33,000 pages/s on 300k rows (0.0.13, commit 5411b13)
-- [ ] the JSON-vs-BCS parity check re-run once sealed-content and gate-lifecycle events exist on the network
-  (F24) — gated on those events
+- [x] the JSON-vs-BCS parity check re-run once sealed-content and gate-lifecycle events exist on the network
+  (F24) — 2026-10-22: 34/34 live access_gate events, 2/2 sealed-content, 7/7 on a scratch publication for `GateMadeFree` and `PlatformMigrated` (F24, log entry)
 
 ---
 
@@ -2173,7 +2191,7 @@ Every test project that exists runs in CI. Up to 0.0.11: one vitest project (52 
 
 6. MUST keep the API process unable to write the index (0.0.12) — **holds** (F22).
 7. MUST keep the stored columns equal to what the client parsers derive from the BCS — **holds** on every
-   live event (F24); re-check when new kinds appear.
+   live event and, since 2026-10-22, for every kind (F24); re-check when a Move event changes.
 
 **RUST lens baseline (from 0.0.12):**
 
@@ -2451,6 +2469,10 @@ The four first-pass questions and OQ5-OQ7 are decided (OQ6 was superseded by OQ7
     `rustls-webpki` 0.103.16 and `webpki-roots` 1.0.10 for RUSTSEC-2026-0382 / RUSTSEC-2026-0381 (emSign intermediates; the TLS connection to the full node). No behaviour change; `Cargo.lock` only. Not yet pinned in `config/images.yaml`.
   - **Section D:** the 0.0.12 rollout row is ticked as superseded by the settled 0.0.14 cutover and the live 0.0.15; the 0.0.14 and 0.0.15 rows now cite the pin and the live state; the Cloudflare zone rate-limit rule row is ticked as **decided: not needed** (Ingress per-IP limit and edge cache bound it; F6 text and the verification table updated).
   - Counts unchanged (19 RESOLVED, 1 MITIGATED, 3 ADJUDICATED, 1 ACCEPTED-RISK, 0 DEFERRED, 8 Positive for F1–F32). Not verified here: the live cluster state and the 0.0.15 rollout (no cluster access; maintainer's report), the advisory fix against `cargo deny` (taken from the green `Rust CI` run on `main`).
+- 2026-10-22 (F24 parity re-run; no code change) — the Section D gate closed.
+  - **Method and result:** F24 ("Parity re-run 2026-10-22"): the published client parsers as the oracle, the full node's own `json` as the second input, the API's filters and stats as the derived side. **43 events identical**: 34 access_gate events and 2 sealed-content pointers on the deployed index (0.0.16), 7 on a scratch publication through a local `ingest` + `api` for the two kinds that cannot be produced on the live package. No finding.
+  - **Events generated** with the maintenance runner `0xbf4bd853…424f` (testnet, about 0.05 SUI): gate creations, a purchase, a consume with auto-burn, a voluntary `burn`, two `make_gate_immutable`, two `sealed_content::publish` (digests in F24). Not produced: `GateMadeFree` and `PlatformMigrated` on the live package (a 1 SUI fee, and the maintainer's `PlatformAdminCap`), and `PlatformConfigUpdated` (two exist from the maintainer's re-pricing, 2 of 2 identical).
+  - **Counts unchanged** (19 RESOLVED, 1 MITIGATED, 3 ADJUDICATED, 1 ACCEPTED-RISK, 0 DEFERRED, 8 Positive for F1–F32). F24 stays ADJUDICATED (the decision is the same; the gate that backed it is closed). The comparison script was run from a scratch directory and is not kept (it needs a funded key to generate events).
 
 ## Pre-save consistency checklist (this pass)
 
@@ -2477,3 +2499,4 @@ The four first-pass questions and OQ5-OQ7 are decided (OQ6 was superseded by OQ7
 - [x] 2026-10-20 (0.0.15): C.1 counts measured (144 Rust tests, 11 SBOM-gate cases); re-verification log entry added.
 - [x] 2026-10-20 (F19, clients): finding header ↔ body: F2 and F19 RESOLVED in the header, the table and the body; Section D ↔ dispositions: the stale-head-page row ticked with evidence; the Status block, the Executive summary posture and the findings table agree (19 / 1 / 3 / 1 / 0 / 8 for F1-F32); re-verification log entry added.
 - [x] 2026-10-22 (close-out): Section D rows (0.0.12, 0.0.14, 0.0.15, zone rule) ticked with evidence; Deployment status updated; log entry added; counts unchanged.
+- [x] 2026-10-22 (F24 parity): the Section D parity box ticked with evidence; F24, C.2, A40, B.SC-3 and the normative item 7 updated; log entry added; counts unchanged.
