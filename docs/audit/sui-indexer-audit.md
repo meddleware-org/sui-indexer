@@ -31,8 +31,11 @@ packages against the binary (lockfile committed, Dependabot-tracked, never shipp
 
 **Deployment status:**
 
-- **2026-10-20: `0.0.15` (the one-off SQLite importer and `rusqlite` removed; no behaviour change for the API; F31) committed
-  locally, not released.** Per the maintainer the cutover to PostgreSQL is done and settled: the legacy SQLite Deployment, the import Job,
+- **2026-10-22: `0.0.15` is released and live; `0.0.16` is released.** Tag `v0.0.15` (the SQLite importer removed) is pinned in the workspace `config/images.yaml` (`tag: "0.0.15"`, digest `sha256:311a8ef7…c3e`) and rolled out
+  (the maintainer's and the orchestrator's report; not re-observed by this review). Tag `v0.0.16` = `e45e941` (2026-10-22; the `Publish (Docker)` run for the tag succeeded) updates `rustls-webpki` to 0.103.16 and `webpki-roots` to 1.0.10 for
+  RUSTSEC-2026-0382 and RUSTSEC-2026-0381 (certificate paths through distrusted emSign intermediates could be accepted; this affects the TLS connection to the full node over gRPC; the database connection pins its own CA). Not yet pinned in `config/images.yaml`.
+- **2026-10-20 (historical): `0.0.15` (the one-off SQLite importer and `rusqlite` removed; no behaviour change for the API; F31) was committed
+  locally, not released at that time.** Per the maintainer the cutover to PostgreSQL is done and settled: the legacy SQLite Deployment, the import Job,
   the old PVC, the legacy NetworkPolicies and the server backup of the old volume are deleted from the cluster (not re-observed by this review;
   `config/images.yaml` pins the 0.0.14 digest `sha256:ed5f66b2…0566`). In the workspace `post-bootstrap/sui-indexer/migration/` is deleted and
   `apply.sh` keeps only the first-apply check for the database Secrets and the CA. The overlay is not changed by this work: the maintainer tags
@@ -891,7 +894,7 @@ The edge rate rule (not in this repo) is the remaining bound.
   tunnel → nginx → pod); nginx is the admitted peer.
 - CLAUDE.md now says "Canonical URLs … non-canonical spellings get a cacheable 301".
 - Not set: the Cloudflare zone rate-limit rule (free plan, one rule used for the token service;
-  documented in the infrastructure README). The edge cache and the ingress limit bound the load.
+  documented in the infrastructure README). The edge cache and the ingress limit bound the load. **Decided 2026-10-22:** no zone rule is needed (the Ingress per-IP limit and the edge cache are the bound; nothing to add).
 
 **Re-verified 2026-10-19 (0.0.12, Rust):** `canonical_query`/`canonical_path` (`crates/api/src/query.rs`) reproduce `URLSearchParams` parsing, serialisation and `set` semantics exactly (proptests: round trip, idempotence — no 301 loops — unique keys, path idempotence); `client_key` keys IPv6 by /64 and the limiter evicts the least recently used bucket past 50,000. Tests: all canonical-URL and transport cases of 0.0.11 ported. Live comparison: `limit=05` and an upper-case stats path get the same 301 `Location` as 0.0.11. Disposition unchanged (RESOLVED).
 
@@ -2031,7 +2034,7 @@ Every test project that exists runs in CI. Up to 0.0.11: one vitest project (52 
 | JSON renderings of kinds not yet seen on testnet | no (fixtures written from the Move sources) | the first such events: re-run the parity check | F24 |
 | Container runtime (nonroot, read-only root, probes, PostgreSQL over TLS) | smoke test covers nonroot, read-only root, `/readyz`, headers, the exec probe, the writer lock, the outage; probes and security context are read from the manifests (rendered, not applied) | cluster | F10, B.IMG-2 |
 | The database tier on the cluster | no (the roles created by the real `provision.sh` on a local PostgreSQL); the cutover from SQLite is done and its tooling removed (0.0.15) | the cluster | F28 |
-| Cloudflare cache and rate rule | no | zone rate-limit rule not set (free plan, maintainer item in the infrastructure README) | F6 |
+| Cloudflare cache and rate rule | no | none needed (decided 2026-10-22: the Ingress per-IP limit and the edge cache bound it) | F6 |
 | Ingest on real events of the new packages | partly (live: 11 `access-gate` events on 2026-10-19, 0 `sealed-content`) | first sealed-content publication on `0x0c8f7349…` | B.SC-1 |
 
 ---
@@ -2075,17 +2078,13 @@ Every test project that exists runs in CI. Up to 0.0.11: one vitest project (52 
 - [x] low-S and ed25519 rules match the Sui client lens; parity vectors green — N/A: the indexer verifies no
   signatures (A18); the TS↔Rust parity check passed 19/19 (F24, B.SC-3)
 - [x] rate limit keyed on a trusted address; SIGTERM handled — A22, A24
-- [ ] 0.0.12 released and rolled out: tag `v0.0.12` (CI green, signature and three SBOM attestations
-  verified), `config/images.yaml` at 0.0.12 with the consensus digest and `sync-manifests.sh`, then the
-  two-container deployment; after rollout the same events count and generation, a pre-cutover cursor still
-  pages, `/healthz` 200 with both streams fresh, the `.bak-pre-rust-*` copy logged, treasury-ui and seal-ui
-  list history, the status page's "Chain index" is green — maintainer item (release and cluster), D58.
-  *2026-10-20: `config/images.yaml` pins 0.0.13; whether these post-rollout checks were done is not recorded here,
-  and the settled 0.0.14 cutover (ticked below) makes the live checks (events, generation, `/healthz`, the consuming apps, the status page) the maintainer's to confirm.*
+- [x] 0.0.12 released and rolled out — superseded by the settled 0.0.14 cutover and the live 0.0.15 (2026-10-22): the 0.0.12 and 0.0.13 images were never the end state (`config/images.yaml` went 0.0.11 → 0.0.13 → 0.0.14 → 0.0.15, tags `v0.0.12`–`v0.0.16`
+  exist), so the post-rollout checks of a two-container SQLite pod (the `.bak-pre-rust-*` copy, a pre-cutover cursor on SQLite) no longer apply; the equivalent live checks (events count and generation, `/healthz`, treasury-ui and seal-ui history, the status page's "Chain index") belong to the PostgreSQL
+  cutover row below and are the maintainer's report, not re-observed here. Ticked 2026-10-22.
 - [x] **0.0.14 (PostgreSQL) released and cut over** — D59/D60, F27–F32. Evidence: `config/images.yaml` pins the 0.0.14 digest `sha256:ed5f66b2…0566`; the maintainer reports (2026-10-20) that the cutover is done and settled and that the legacy SQLite
   Deployment, the import Job, the old PVC, the legacy NetworkPolicies and the server backup of the old volume are deleted. Not re-observed by this review (no cluster access); the per-step checks of the former runbook (import report, pre-cutover cursor, `/healthz`,
   consuming apps, status page) are therefore the maintainer's, not recorded here.
-- [x] **the SQLite importer removed (0.0.15)** — F31: the `import-sqlite` feature, `rusqlite`, the importer, the fixture builder, `tests/golden` and `migration/` are deleted (Executive summary, F31; commit 333fe69); the 0.0.15 image is built and pinned by the maintainer's release (tag, `refresh-digests.sh`, `sync-manifests.sh`), which `OPERATOR_TASKS.md` tracks as "sui-indexer 0.0.15 release"
+- [x] **the SQLite importer removed (0.0.15)** — F31: the `import-sqlite` feature, `rusqlite`, the importer, the fixture builder, `tests/golden` and `migration/` are deleted (Executive summary, F31; commit 333fe69); the 0.0.15 image is released (tag `v0.0.15`) and pinned in the workspace `config/images.yaml` (`0.0.15@sha256:311a8ef7…`), live per the maintainer's report (2026-10-22). 0.0.16 (RUSTSEC-2026-0382 and -0381, the TLS crates) is released (`v0.0.16` = `e45e941`); pinning it is the maintainer's release step (`OPERATOR_TASKS.md`)
 
 ### pre-mainnet
 
@@ -2102,7 +2101,7 @@ Every test project that exists runs in CI. Up to 0.0.11: one vitest project (52 
 - [ ] backup of the index with an offsite copy, and a restore drill that includes `sui_indexer` (F3, F28): the tier's `postgres-backup` CronJob covers the database
   once the tier is applied; the offsite copy (R2, encrypted to an offline key) is **not configured**, and until it is, losing the node loses the dump with the data —
   maintainer item (`OPERATOR_TASKS.md` "Database tier" steps 4-5); supersedes the volume-snapshot row for `sui-indexer-data`, which no longer exists
-- [ ] Cloudflare zone rate-limit rule (F6) — maintainer item (free plan)
+- [x] Cloudflare zone rate-limit rule (F6) — **decided 2026-10-22: not needed.** The Ingress per-IP limit (20 r/s, burst 80, `429`) above the app's own (10 r/s, burst 40) and the edge cache bound the origin load; the free plan's single rule stays with the token service. No change to make.
 - [ ] external review — maintainer item
 - [x] chain-identity check on `GRPC_URL` — F8, F16 (0.0.6)
 - [x] image scan gate, scan of the published image before signing, image and manifest scans clean at the
@@ -2447,6 +2446,12 @@ The four first-pass questions and OQ5-OQ7 are decided (OQ6 was superseded by OQ7
   - `docker-publish.yml`: the private rebuild jobs are replaced by one `mirror-private` job that copies the published quay.io image (and its cosign artifacts) to the self-hosted registry by digest and fails unless the digest and the signature match (build once, promote by digest; committed locally, not yet released; the `PRIVATE_REGISTRY_*` credentials are still unset).
 - 2026-10-20 — release workflow restructured (D61; commit 417b5ff, not released): `docker-publish.yml` builds amd64 and arm64 on native runners, merges the per-architecture indexes, scans by digest, then signs and attests the merged digest; `mirror-private`, the per-binary CycloneDX SBOMs, the syft SPDX SBOM, build provenance on both registries, the version check and the `rust-ci.yml` gate are kept; a manual run is a dry run. No code, image or version change (CI-only; `CHANGELOG.md` `[Unreleased]`). Evidence and the list of what only the next tag can test: F10, *Re-verified 2026-10-20 (release workflow)*. No finding changes disposition.
 
+- 2026-10-22 (audit close-out) — status and gates brought in line with the releases; no code change in this pass.
+  - **Releases:** `0.0.15` (importer removed) is released and live (`config/images.yaml` pins `0.0.15@sha256:311a8ef7…`; live per the maintainer's report); `0.0.16` (`v0.0.16` = `e45e941`, 2026-10-22, `Publish (Docker)` run succeeded) takes
+    `rustls-webpki` 0.103.16 and `webpki-roots` 1.0.10 for RUSTSEC-2026-0382 / RUSTSEC-2026-0381 (emSign intermediates; the TLS connection to the full node). No behaviour change; `Cargo.lock` only. Not yet pinned in `config/images.yaml`.
+  - **Section D:** the 0.0.12 rollout row is ticked as superseded by the settled 0.0.14 cutover and the live 0.0.15; the 0.0.14 and 0.0.15 rows now cite the pin and the live state; the Cloudflare zone rate-limit rule row is ticked as **decided: not needed** (Ingress per-IP limit and edge cache bound it; F6 text and the verification table updated).
+  - Counts unchanged (19 RESOLVED, 1 MITIGATED, 3 ADJUDICATED, 1 ACCEPTED-RISK, 0 DEFERRED, 8 Positive for F1–F32). Not verified here: the live cluster state and the 0.0.15 rollout (no cluster access; maintainer's report), the advisory fix against `cargo deny` (taken from the green `Rust CI` run on `main`).
+
 ## Pre-save consistency checklist (this pass)
 
 - [x] Section A ↔ findings: A16–A24 are RUST rows (2026-10-19); A38–A42 HOLD (F22–F24, cutover); A43 does not
@@ -2471,3 +2476,4 @@ The four first-pass questions and OQ5-OQ7 are decided (OQ6 was superseded by OQ7
 - [x] 2026-10-20 (0.0.15): finding header ↔ body: F31 RESOLVED in the header, the table and the body; Section A rows A41, A42, A48 N/A; Section D ↔ dispositions: the 0.0.14 cutover and the importer-removal rows ticked with evidence, no new unticked row; counts in the Status, the Executive summary and the findings table agree (17 / 2 / 3 / 1 / 1 / 8 for F1-F32).
 - [x] 2026-10-20 (0.0.15): C.1 counts measured (144 Rust tests, 11 SBOM-gate cases); re-verification log entry added.
 - [x] 2026-10-20 (F19, clients): finding header ↔ body: F2 and F19 RESOLVED in the header, the table and the body; Section D ↔ dispositions: the stale-head-page row ticked with evidence; the Status block, the Executive summary posture and the findings table agree (19 / 1 / 3 / 1 / 0 / 8 for F1-F32); re-verification log entry added.
+- [x] 2026-10-22 (close-out): Section D rows (0.0.12, 0.0.14, 0.0.15, zone rule) ticked with evidence; Deployment status updated; log entry added; counts unchanged.
