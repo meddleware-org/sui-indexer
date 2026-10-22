@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.16] - 2026-10-22
+
+### Security
+
+- `rustls-webpki` 0.103.16 and `webpki-roots` 1.0.10 (RUSTSEC-2026-0382 and RUSTSEC-2026-0381: certificate paths through distrusted emSign intermediates could be accepted). Affects the TLS connection to the full node.
+
 ## [0.0.15] - 2026-10-20
 
 ### Removed

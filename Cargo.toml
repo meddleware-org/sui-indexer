@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/store", "crates/ingest", "crates/api", "crates/testkit"]
 
 [workspace.package]
-version = "0.0.15"
+version = "0.0.16"
 edition = "2024"
 # The dependency graph's floor (checked in CI by the `msrv` job).
 rust-version = "1.88"
