@@ -7,7 +7,7 @@
   - the `access_gate` module events;
   - `sealed_content::SealedContentPublished`.
 - It serves cacheable GET pages behind Cloudflare.
-- Apps (treasury-ui activity, seal-ui discovery) read history from it when `VITE_INDEXER_URL` is set,
+- Apps (treasury-ui activity, sealed-storage-ui discovery) read history from it when `VITE_INDEXER_URL` is set,
   and fall back to the full node otherwise.
 
 **Project type:** Rust service (from 0.0.12: a Cargo workspace with two binaries, `ingest` — the sole
@@ -84,9 +84,9 @@ packages against the binary (lockfile committed, Dependabot-tracked, never shipp
 - The status page's "Chain Access → Chain index" check reads the in-cluster `/healthz`
   (`OPERATOR_TASKS.md`, done 2026-10-09).
 - Manifests: `post-bootstrap/sui-indexer` in the infrastructure workspace (read for this pass, see Scope).
-- Consumers: treasury-ui (`useTreasuryActivity`) and seal-ui (`discoverSealedContent`) through
+- Consumers: treasury-ui (`useTreasuryActivity`) and sealed-storage-ui (`discoverSealedContent`) through
   `VITE_INDEXER_URL` (`https://sui-indexer.meddleware.co.uk`). Decoding happens in access-gate-client
-  (0.0.8) and seal-client (0.0.19).
+  (0.0.8) and sealed-storage-client (0.0.19).
 
 **Review date:** 2026-10-03; re-verified 2026-10-09 (code at `a3369bb` = tag `v0.0.9`); code gates closed in 0.0.10 (`5251f38`), released and deployed 2026-10-18; re-verified 2026-10-19 against the Rust rewrite (0.0.12, local commits, not released); F25 fixed in 0.0.13 (local commit); re-verified 2026-10-20 against 0.0.14 (PostgreSQL storage, local commits, not released); 0.0.15 (importer removed) re-verified the same day
 **Reviewer:** Internal review
@@ -130,10 +130,10 @@ the index; the offsite copy is operator work and not configured). Totals for F1�
 crates only they pulled in, the importer and parity tests, the SQLite fixture builder, `tests/golden`, `migration/` and the legacy manifests are gone (evidence in F31).
 A41, A42 and A48 are N/A (the data moved and the importer no longer exists); the Section D rows for the 0.0.14 cutover and the 0.0.15 removal are ticked. Totals for F1–F32:
 17 RESOLVED, 2 MITIGATED (F2, F3), 3 ADJUDICATED, 1 ACCEPTED-RISK (F28), 1 DEFERRED (F19, a client change), 8 Positive (F12, F13, F14, F22, F27, F29, F30, F32).
-**2026-10-20 (clients, F19; no change in this repo):** F19 is RESOLVED in access-gate-client 0.0.10 and seal-client 0.0.21 (local commits at the time; both released since: tags `v0.0.10` and `v0.0.21`, npm `latest`, read 2026-10-22): a head page whose `polledAt` is
+**2026-10-20 (clients, F19; no change in this repo):** F19 is RESOLVED in access-gate-client 0.0.10 and sealed-storage-client 0.0.21 (local commits at the time; both released since: tags `v0.0.10` and `v0.0.21`, npm `latest`, read 2026-10-22): a head page whose `polledAt` is
 missing, null or older than 60 s is treated as unavailable and the node fallback runs (evidence in F19). F2 follows to RESOLVED and the Section D row *clients treat a stale head page as
 unavailable* is ticked. Totals for F1–F32: 19 RESOLVED, 1 MITIGATED (F3), 3 ADJUDICATED, 1 ACCEPTED-RISK (F28), 0 DEFERRED, 8 Positive (F12, F13, F14, F22, F27, F29, F30, F32).
-The apps (treasury-ui, seal-ui) get the behaviour when they take the two client releases (done 2026-10-22: treasury-ui 0.0.19, dao-ui 0.1.35, seal-ui 0.0.40, walrus-ui 0.1.61, token-deployer-ui 0.0.38; the dashboard embeds them in 0.1.88).
+The apps (treasury-ui, sealed-storage-ui) get the behaviour when they take the two client releases (done 2026-10-22: treasury-ui 0.0.19, dao-ui 0.1.35, sealed-storage-ui 0.0.40, walrus-storage-ui 0.1.61, token-issuance-ui 0.0.38; the dashboard embeds them in 0.1.88).
 
 **Front matter (RUST lens, from 0.0.12):**
 
@@ -151,7 +151,7 @@ with `min(available_parallelism, 4)` workers (`net`, `time`, `signal`, `sync`)
 | `sui-indexer-testkit` | `seed-fixture` (CI only) | fixtures; never in the image |
 
 Up to 0.0.11 (TS lens): npm lockfile; esbuild bundle `dist/main.mjs` (603 kB); Node ≥ 24 on distroless
-`nodejs26-debian13` (0.0.11); runtime dependencies `@meddleware/access-gate-client`, `@meddleware/seal-client`,
+`nodejs26-debian13` (0.0.11); runtime dependencies `@meddleware/access-gate-client`, `@meddleware/sealed-storage-client`,
 `@mysten/sui`.
 
 **Front matter (SUI_CLIENT lens):**
@@ -315,7 +315,7 @@ cites the commit and the test that pins it.
 
 | Disposition | Findings |
 | --- | --- |
-| RESOLVED | F2 (stuck ingest; indexer side 0.0.5, clients' freshness check F19), F19 (clients treat a stale head page as unavailable; access-gate-client 0.0.10, seal-client 0.0.21), F1 (full-stream scans), F25 (rare-kind `kinds` filters; `events_kind`, 0.0.13), F4 and F18 (SBOM of the bundled code: npm in 0.0.10, Cargo per binary in 0.0.12), F5 (licence notices), F6 (cache key and limiter), F9 (casts, ETags), F10 (CI and image pipeline), F11 (documentation drift; last residual fixed 2026-10-19), F15 (pruned-cursor wedge), F16 (chain-identity startup bug; the startup path is now tested), F17 (libssl advisories in the base image), F20 (operator-keyed lookups), F21 (`noUncheckedIndexedAccess`; TS-only, superseded), F23 (health across two processes, 0.0.12), F26 (connection cap, 0.0.12), F31 (the temporary SQLite import path; removed in 0.0.15) |
+| RESOLVED | F2 (stuck ingest; indexer side 0.0.5, clients' freshness check F19), F19 (clients treat a stale head page as unavailable; access-gate-client 0.0.10, sealed-storage-client 0.0.21), F1 (full-stream scans), F25 (rare-kind `kinds` filters; `events_kind`, 0.0.13), F4 and F18 (SBOM of the bundled code: npm in 0.0.10, Cargo per binary in 0.0.12), F5 (licence notices), F6 (cache key and limiter), F9 (casts, ETags), F10 (CI and image pipeline), F11 (documentation drift; last residual fixed 2026-10-19), F15 (pruned-cursor wedge), F16 (chain-identity startup bug; the startup path is now tested), F17 (libssl advisories in the base image), F20 (operator-keyed lookups), F21 (`noUncheckedIndexedAccess`; TS-only, superseded), F23 (health across two processes, 0.0.12), F26 (connection cap, 0.0.12), F31 (the temporary SQLite import path; removed in 0.0.15) |
 | MITIGATED | F3 (history loss on config change fixed; loss of the storage is now covered by the database tier's daily dump, the offsite copy is operator work and not configured) |
 | ADJUDICATED | F7 (new event types need a fresh publish), F8 (display-only trust in the node; chain identity now checked), F24 (stored columns from the node's JSON rendering; parity gate) |
 | ACCEPTED-RISK | F28 (shared fate with the auth PostgreSQL; D59, mitigations in the finding) |
@@ -328,7 +328,7 @@ cites the commit and the test that pins it.
   tested.
 - The operating-at-scale items (query cost, stuck ingest, destructive rebinding) are fixed in code and
   pinned by tests. What remains is the **platform side** (volume backup, F3). The **client side of
-  freshness** (F19) is fixed in access-gate-client 0.0.10 and seal-client 0.0.21 (the apps take it with their next bump). SBOM completeness (F18) is fixed in the 0.0.10 release workflow.
+  freshness** (F19) is fixed in access-gate-client 0.0.10 and sealed-storage-client 0.0.21 (the apps take it with their next bump). SBOM completeness (F18) is fixed in the 0.0.10 release workflow.
 - The first pass recorded findings only; this pass records the dispositions of the fixes released
   2026-10-08/09 (see the re-verification log).
 - 2026-10-19: the Rust rewrite keeps every behaviour above and adds a process boundary — the API can no
@@ -353,7 +353,7 @@ cites the commit and the test that pins it.
 | Another tenant of the PostgreSQL tier | connections, load, the tier's availability | Starve or take down the index | per-role connection limits and timeouts; the API answers `503` and the clients fall back (F28, accepted) |
 | Operator / config (`NETWORK`, `GRPC_URL`, `*_ORIGINAL_ID`, `DATABASE_URL`) | what is indexed, where it is stored | A package-ID change clears a stream | Validated and normalised IDs; startup refuses until `REINDEX_CONFIRM` names the stream; `VACUUM INTO` backup first; generation rotation (F3). The backup sits on the same volume |
 | `access_gate` / `seal_policies` publisher | event types and layouts | Add event types in an upgrade | Exact-type parsers. Upgrade-defined types are not indexed: new event types need a fresh publish (F7, decision) |
-| Consumer apps | interpretation | Treat display data as truth | Display-only invariant; the clients decode again and fall back on errors. Head pages carry `polledAt`; the clients treat a missing, null or older-than-60-s value as unavailable and fall back (F19, access-gate-client 0.0.10 / seal-client 0.0.21) |
+| Consumer apps | interpretation | Treat display data as truth | Display-only invariant; the clients decode again and fall back on errors. Head pages carry `polledAt`; the clients treat a missing, null or older-than-60-s value as unavailable and fall back (F19, access-gate-client 0.0.10 / sealed-storage-client 0.0.21) |
 | Dependency and base-image authors | crates (0.0.12; bundled JS before); base layers | Ship vulnerable code | `Cargo.lock`; `cargo deny` (RustSec advisories, licences, bans, sources: crates.io only); digest pins; Trivy image scan before sign; `Cargo.lock` and licence notices in the image; a checked CycloneDX SBOM per binary (F18) |
 
 ### On-chain dependency matrix (SUI_CLIENT lens)
@@ -361,7 +361,7 @@ cites the commit and the test that pins it.
 | Object / package | ID | Sourced from | Used as | If stale / wrong | Fails |
 | --- | --- | --- | --- | --- | --- |
 | `access_gate` package | original ID = published-at `0xd7ddaa94…88c9` (testnet, 2026-10-09; previously `0xa55789…6d41`) | `@meddleware/access-gate-client/deployments`, or `ACCESS_GATE_ORIGINAL_ID` | event filter `<id>::access_gate` (`eventTypeModule`); parser's expected type prefix | a wrong ID indexes nothing and, on the next start, is refused until `REINDEX_CONFIRM` (F3); upgrade-defined types missed (F7) | closed (refuses to start) |
-| `seal_policies` package | original ID = published-at `0x0c8f7349…773d` (testnet, 2026-10-09; previously `0x61c4aa…7e42`) | `@meddleware/seal-client/deployments`, or `SEAL_ORIGINAL_ID` | filter `<id>::sealed_content::SealedContentPublished` | same | same |
+| `seal_policies` package | original ID = published-at `0x0c8f7349…773d` (testnet, 2026-10-09; previously `0x61c4aa…7e42`) | `@meddleware/sealed-storage-client/deployments`, or `SEAL_ORIGINAL_ID` | filter `<id>::sealed_content::SealedContentPublished` | same | same |
 | Full node | `GRPC_URL` | env / Mysten default | event source | wrong network ⇒ refused at startup (chain identifier check, F8); a compromised node ⇒ fabricated rows (display-only) | closed at startup |
 
 ### Threat model — service actor matrix (RUST lens, from 0.0.12)
@@ -429,9 +429,9 @@ Critical / High / Medium / Low / Info / Positive.
 **Cross-repo evidence (read-only):**
 
 - `@mysten/sui` gRPC core (`listEvents`, cursor and filter handling) in `node_modules`;
-- the client deployments as installed (`access-gate-client` 0.0.8, `seal-client` 0.0.19) and their
+- the client deployments as installed (`access-gate-client` 0.0.8, `sealed-storage-client` 0.0.19) and their
   CHANGELOGs;
-- treasury-ui and seal-ui indexer wiring;
+- treasury-ui and sealed-storage-ui indexer wiring;
 - the infrastructure workspace: `post-bootstrap/sui-indexer` (Deployment, Ingress, NetworkPolicy, PVC,
   README), `config/images.yaml`, `OPERATOR_TASKS.md`, `STORAGE.md`;
 - quay.io and Docker Hub (`skopeo inspect` of the 0.0.9 index; the OCI referrers and SBOM attestation
@@ -460,7 +460,7 @@ configuration and the cluster platform (platform lens).
 | `npm audit --audit-level=high` | 0 vulnerabilities |
 | `npm run build` | `dist/main.mjs` 603.1 kB |
 | `npm run check:licenses` | 24 production packages; 4 without a licence file in the package (`@mysten/bcs`, `@mysten/seal`, `@mysten/utils`, `poseidon-lite`: the declared licence is recorded instead); `dist/THIRD_PARTY_LICENSES` contains the Apache-2.0 text |
-| `npm ls` | one `@mysten/sui` (2.35.0) across both clients; `access-gate-client` 0.0.8 deduped under `seal-client` |
+| `npm ls` | one `@mysten/sui` (2.35.0) across both clients; `access-gate-client` 0.0.8 deduped under `sealed-storage-client` |
 | Lockfile install scripts | `esbuild` (dev), `fsevents` (dev, optional) |
 | `skopeo inspect` | `quay.io/meddleware-org/sui-indexer:0.0.9` and `docker.io/meddleware/sui-indexer:0.0.9` both `sha256:aea58153…1704`, equal to `config/images.yaml` |
 | Published image config (amd64) | `User 65532:65532`; `PORT=8080 DB_PATH=/data/indexer.db`; label version `0.0.9` (no `v`); `/app` holds `main.mjs`, `package.json`, `package-lock.json`, `THIRD_PARTY_LICENSES` (91.9 kB) |
@@ -494,7 +494,7 @@ configuration and the cluster platform (platform lens).
 | `cargo +1.88 check --locked --workspace --all-targets --all-features`; `cargo +1.88 test --workspace --locked --all-features` | passes; 154 passed (MSRV 1.88 unchanged: no new dependency raised it) |
 | `cargo deny check` (0.20.2) | advisories ok, bans ok (duplicates warned: `base64`, `block-buffer`, `const-oid`, `crypto-common`, `digest`, `getrandom`, `syn`), licenses ok, sources ok |
 | `cargo cyclonedx` + `scripts/check-sbom.sh` | `api` SBOM lists all 116 crates of its graph; `ingest` (with `--features import-sqlite`) all 182; `check-sbom-test.sh` 12 cases pass |
-| `tests/contract` (Node 26.12, `@meddleware/access-gate-client` 0.0.9, `@meddleware/seal-client` 0.0.20) | 5 passed against `target/release/api`, a seeded database, the API as the SELECT-only role |
+| `tests/contract` (Node 26.12, `@meddleware/access-gate-client` 0.0.9, `@meddleware/sealed-storage-client` 0.0.20) | 5 passed against `target/release/api`, a seeded database, the API as the SELECT-only role |
 | `podman build` + `DOCKER=podman bash scripts/smoke.sh` | image 39 MB; the smoke test passes (PostgreSQL with TLS, two containers, role separation, second ingester refused, outage and recovery) |
 | Golden parity | `scripts/golden-from-0.0.13.sh` against a real 0.0.13 `api` over the importer's fixture: 53 routes; the imported PostgreSQL index reproduces all 53 byte for byte |
 | Live (read-only) | `ingest` against `fullnode.testnet.sui.io` into a local PostgreSQL (17 events, the same as the live instance), `api` on it as the SELECT-only role: 97 routes identical to `https://sui-indexer.meddleware.co.uk` (generation, ETag generation and poll time aside) |
@@ -512,7 +512,7 @@ configuration and the cluster platform (platform lens).
 | `cargo deny check` (0.20.2) | advisories ok, bans ok (duplicates warned: `getrandom`, `syn`), licenses ok, sources ok |
 | `cargo about generate --fail` (0.9.2), per binary | passes; `api` 44 crates, `ingest` 137 crates |
 | `cargo cyclonedx` (0.5.9) + `scripts/check-sbom.sh` | `api` SBOM lists all 63 crates of its graph, `ingest` all 139; a removed crate fails (`scripts/tests/check-sbom-test.sh`, 10 cases) |
-| `tests/contract` (vitest, `@meddleware/access-gate-client` 0.0.9, `@meddleware/seal-client` 0.0.20) | 5 passed against `target/release/api` |
+| `tests/contract` (vitest, `@meddleware/access-gate-client` 0.0.9, `@meddleware/sealed-storage-client` 0.0.20) | 5 passed against `target/release/api` |
 | `podman build` | image 38.3 MB; `DOCKER=podman bash scripts/smoke.sh` passes (two containers, API mount `:ro`) |
 | Live (read-only) | `ingest` against `fullnode.testnet.sui.io` into a scratch DB (11 events), `api` on it: 10 routes and 6 error/redirect cases identical to `https://sui-indexer.meddleware.co.uk` (generation and poll time aside); parity 19/19 (F24) |
 | Load (dev-only closed-loop client, 64 keep-alive connections, 10 s, limiter raised) | head page ≈ 18k req/s (11 rows), ≈ 14k req/s (300k rows); `gate=` filter ≈ 5.2k req/s; `kinds=AccessConsumed` on 300k rows **10 req/s** on 0.0.12 (F25). On 0.0.13 (same 300k rows, 16 keep-alive connections from a Python client, so the client bounds the top figure): head page ≈ 5.9k, `kinds=AccessConsumed` ≈ 5.9k (0.0.12 binary on the same data: 7), two kinds ≈ 5.2k (0.0.12: ≈ 5.8k; one seek per kind is a little dearer when both kinds are common), `gate=` ≈ 5.8k req/s. Single thread through `Reader::page`: 8 pages/s before, ≈ 33,000 after. Index build on 300k rows ≈ 0.5 s; 8,554 head-page reads ran meanwhile, the slowest 0.57 ms |
@@ -596,7 +596,7 @@ First-pass commands (2026-10-03, Node 22.22.2) are recorded in the re-verificati
 
 ### F2 — One undecodable event halts both streams forever; stale pages give no signal
 
-**Severity:** Low   **Disposition:** RESOLVED (indexer side in 0.0.5, `1973fca`; monitoring done 2026-10-09; the clients' use of `polledAt` is F19, RESOLVED 2026-10-20 in access-gate-client 0.0.10 and seal-client 0.0.21)
+**Severity:** Low   **Disposition:** RESOLVED (indexer side in 0.0.5, `1973fca`; monitoring done 2026-10-09; the clients' use of `polledAt` is F19, RESOLVED 2026-10-20 in access-gate-client 0.0.10 and sealed-storage-client 0.0.21)
 **Where:**
 
 - `src/ingest.ts:98-105`: `toIndexed` throws for a recognised event whose BCS does not decode, which
@@ -625,8 +625,8 @@ First-pass commands (2026-10-03, Node 22.22.2) are recorded in the re-verificati
 **Impact:**
 
 - Ingest for **both** products stops until a code or configuration change.
-- treasury-ui and seal-ui keep showing stale history with no fallback, because they fall back only on
-  errors. New sealed content is invisible in seal-ui discovery.
+- treasury-ui and sealed-storage-ui keep showing stale history with no fallback, because they fall back only on
+  errors. New sealed content is invisible in sealed-storage-ui discovery.
 - The only signal is an external monitor on `/healthz`, whose wiring is not in this repo.
 
 **Remediation / evidence:**
@@ -639,7 +639,7 @@ First-pass commands (2026-10-03, Node 22.22.2) are recorded in the re-verificati
    Log loudly and expose a count in `/coverage`.
 3. Add `latestCheckpoint` and `lastPollAt` (per stream) to head pages. Have the clients treat a head
    page older than a threshold as unavailable and fall back. That is a client change, coordinated
-   with access-gate-client and seal-client.
+   with access-gate-client and sealed-storage-client.
 4. Add a test for each.
 
 **Resolution (0.0.5, `1973fca`; re-verified at `a3369bb`):**
@@ -659,7 +659,7 @@ First-pass commands (2026-10-03, Node 22.22.2) are recorded in the re-verificati
 - **Monitoring.** The status page's "Chain Access → Chain index" check polls the in-cluster `/healthz`
   and expects `"ok":true` (done 2026-10-09, `OPERATOR_TASKS.md`; the check was failure-tested). The
   external monitor that the first pass found missing exists.
-- **Was remaining (closed 2026-10-20).** The access-gate-client and seal-client did not read `polledAt` (grep
+- **Was remaining (closed 2026-10-20).** The access-gate-client and sealed-storage-client did not read `polledAt` (grep
   of `src/` at 0.0.8 / 0.0.19), so a stale but healthy-looking head page was not treated as
   unavailable by the apps. Fixed in F19: both clients now fall back to the full node when a head page's
   `polledAt` is missing, null or older than 60 s.
@@ -668,7 +668,7 @@ First-pass commands (2026-10-03, Node 22.22.2) are recorded in the re-verificati
 
 **Re-verified 2026-10-20 (0.0.14):** The heartbeats are rows of a new `heartbeats` table (`poll:<stream>`, `ingest:alive`; they were `meta` rows, moved because they are rewritten many times a minute: `fillfactor 50`, so updates stay heap-only), written by the ingester after each poll and read by `/healthz` in one statement (`Reader::polls`); the JSON and the 5 × `POLL_MS` rule are unchanged. New: with PostgreSQL unreachable, `/healthz` is `503` with every stream `ok: false` and `lastError: "database unavailable"` (the cause is logged, not sent). Tests: *polls_the_streams_independently_and_health_names_the_failing_one*, *heartbeats_round_trip*, *a_database_that_cannot_be_reached_is_503_database_unavailable_and_recovers*. Disposition unchanged at the time (MITIGATED; the clients' use of `polledAt` was F19).
 
-**Re-verified 2026-10-20 (clients):** F19 is RESOLVED (access-gate-client 0.0.10, seal-client 0.0.21; released, see Deployment status), which was the one remaining item: a stuck ingest that still answers `200` is now detected by the clients through `polledAt` and the full node answers. Disposition moved to RESOLVED. Nothing in this repository changed; the API contract that the clients rely on (head pages only, `polledAt` an epoch-ms integer or `null` before the first poll) is pinned by *head pages say how fresh the index is; older pages stay immutable and free of it* and the `polledAt` is-null-before-any-poll assertion in `crates/api/src/tests.rs`.
+**Re-verified 2026-10-20 (clients):** F19 is RESOLVED (access-gate-client 0.0.10, sealed-storage-client 0.0.21; released, see Deployment status), which was the one remaining item: a stuck ingest that still answers `200` is now detected by the clients through `polledAt` and the full node answers. Disposition moved to RESOLVED. Nothing in this repository changed; the API contract that the clients rely on (head pages only, `polledAt` an epoch-ms integer or `null` before the first poll) is pinned by *head pages say how fresh the index is; older pages stay immutable and free of it* and the `polledAt` is-null-before-any-poll assertion in `crates/api/src/tests.rs`.
 
 ### F3 — Clearing a stream permanently loses history the full node has pruned
 
@@ -695,7 +695,7 @@ First-pass commands (2026-10-03, Node 22.22.2) are recorded in the re-verificati
 - The same loss follows from losing the RWO volume. Backups are an infrastructure matter and were not
   seen.
 
-**Impact:** an irreversible loss of display history, including seal-ui discovery pointers (content
+**Impact:** an irreversible loss of display history, including sealed-storage-ui discovery pointers (content
 then becomes hard to find, although the on-chain events remain where the node keeps them).
 
 **Remediation / evidence:**
@@ -943,7 +943,7 @@ the access-gate-client audit (exact-type matching at the original ID).
   package IDs differ. That fails safe but silently: `/healthz` stays green.
 - A compromised or MITM'd node (https limits this) could inject fabricated `SealedContentPublished`
   pointers.
-  - seal-ui would list them as discovery results (cross-ref seal-client F6, discovery
+  - sealed-storage-ui would list them as discovery results (cross-ref sealed-storage-client F6, discovery
     unauthenticated).
   - The clients decode them again but cannot check authenticity.
 
@@ -964,7 +964,7 @@ the access-gate-client audit (exact-type matching at the original ID).
 - **Authenticity.** Unchanged and accepted by design: rows are the node's, the clients decode again and
   cannot verify them; a second-node sample check (S5) was not built. The display-only label stays in the
   apps. A compromised node can still inject fabricated `SealedContentPublished` pointers (cross-ref
-  seal-client F6).
+  sealed-storage-client F6).
 
 **Re-verified 2026-10-19 (0.0.12, Rust):** `start()` (`crates/ingest/src/lib.rs`) reads `GetServiceInfo.chain_id` within 30 s and refuses a mismatch or an unreadable identifier; rows remain unauthenticated (display-only). The new trust in the node's JSON rendering is F24. Tests: *start_refuses_a_node_of_another_chain*, `chain.rs` tests. Disposition unchanged (ADJUDICATED).
 
@@ -1061,7 +1061,7 @@ the access-gate-client audit (exact-type matching at the original ID).
 
 **Re-verified 2026-10-20 (0.0.14):** The CI now starts a PostgreSQL 18 with TLS (`scripts/test-postgres.sh`: the image the database tier runs, pinned by digest, a throwaway CA, started by a script rather than as a `services:` container because the tests need TLS) for the `check`, `msrv` and `contract` jobs; `REQUIRE_TEST_DATABASE=1` makes a missing server a failure, and the test step fails on any ignored or skipped test. The default build and the `--all-features` build (the temporary importer and the import-parity check) are both linted and tested (0.0.15: only the default build remains); the SBOM gate is per binary and per feature set (F18; 0.0.15: per binary); the image job runs the new smoke test (PostgreSQL, two containers). Not run here: the GitHub workflows themselves.
 
-**Re-verified 2026-10-20 (release workflow, D61; commit 417b5ff):** `docker-publish.yml` no longer builds both architectures in one QEMU-emulated job (the 0.0.14 publish took about 1.5 hours, almost all of it the arm64 compile). It is now `version`, `verify` (`rust-ci.yml`) and `sbom-crates` (the two CycloneDX per-binary SBOMs, checked by `scripts/check-sbom.sh`), then `build` (a matrix: amd64 on `ubuntu-latest`, arm64 on the native `ubuntu-24.04-arm`; OCI archives, `provenance: mode=max`, **no registry credentials** in the job that compiles the dependencies), `publish-arch` (pushes `<commit>-<arch>` with `skopeo copy --all`, keeping each image's provenance), `merge-docker-public` (`docker buildx imagetools create` per registry, the quay.io and Docker Hub digests asserted equal, `scripts/check-index.sh` asserting both architectures and both attestations, **Trivy by digest, then** cosign sign, the syft SPDX and two CycloneDX attestations, the build-provenance attestation on both registries, output `digest`) and `mirror-private` (unchanged, still by digest). Tags, labels (the same `docker/metadata-action` configuration in each build), build arguments, `latest=auto` and the signer identity `docker-publish.yml@refs/tags/v*` are unchanged; `setup-qemu-action` is gone. The intermediate `<commit>-amd64` / `<commit>-arm64` tags are left in place, as in `nft-gate` and `seal-key-server` (the registries' push credentials cannot be assumed to delete, deleting a tag does not delete the manifests the index references, and `verify-digests.sh` ignores them: its newest-tag check reads only `N.N.N` tags). A `workflow_dispatch` run is a **dry run** (input `dry_run`, default on): both native builds, then the merge, `check-index.sh`, a label check and the Trivy scan against a throwaway `registry:3` service on the runner; no push, no signature, no secret. Evidence on 2026-10-20: `actionlint` clean; the merge step reproduced locally, with the installed `docker buildx` 0.37 against a local registry, from the two per-architecture indexes of the published `seal-key-server` (which uses the same OCI-archive plus `skopeo` flow): the merged digest `sha256:8609cbbe…5497134` equals the published `0.0.2` index byte for byte, so the merge is deterministic and keeps the provenance; `check-index.sh` passes on the published `sui-indexer` 0.0.13, `seal-key-server` 0.0.2 and `nft-gate-gateway` 0.0.24 indexes and fails on a per-architecture index; `scripts/tests/check-index-test.sh` (9 cases, run in `rust-ci.yml`); Trivy 0.74.0 scanned a localhost registry image by digest with `TRIVY_NON_SSL`. **Not yet exercised on GitHub:** the native arm64 build, the OCI-archive export of this Dockerfile, `skopeo` pushes with the real credentials, signing and attestation of the merged digest, and the dry-run job itself; the next tag (or a manual dry run once this is on the default branch) is their test.
+**Re-verified 2026-10-20 (release workflow, D61; commit 417b5ff):** `docker-publish.yml` no longer builds both architectures in one QEMU-emulated job (the 0.0.14 publish took about 1.5 hours, almost all of it the arm64 compile). It is now `version`, `verify` (`rust-ci.yml`) and `sbom-crates` (the two CycloneDX per-binary SBOMs, checked by `scripts/check-sbom.sh`), then `build` (a matrix: amd64 on `ubuntu-latest`, arm64 on the native `ubuntu-24.04-arm`; OCI archives, `provenance: mode=max`, **no registry credentials** in the job that compiles the dependencies), `publish-arch` (pushes `<commit>-<arch>` with `skopeo copy --all`, keeping each image's provenance), `merge-docker-public` (`docker buildx imagetools create` per registry, the quay.io and Docker Hub digests asserted equal, `scripts/check-index.sh` asserting both architectures and both attestations, **Trivy by digest, then** cosign sign, the syft SPDX and two CycloneDX attestations, the build-provenance attestation on both registries, output `digest`) and `mirror-private` (unchanged, still by digest). Tags, labels (the same `docker/metadata-action` configuration in each build), build arguments, `latest=auto` and the signer identity `docker-publish.yml@refs/tags/v*` are unchanged; `setup-qemu-action` is gone. The intermediate `<commit>-amd64` / `<commit>-arm64` tags are left in place, as in `nft-gate` and `seal-key-server` (the registries' push credentials cannot be assumed to delete, deleting a tag does not delete the manifests the index references, and `verify-digests.sh` ignores them: its newest-tag check reads only `N.N.N` tags). A `workflow_dispatch` run is a **dry run** (input `dry_run`, default on): both native builds, then the merge, `check-index.sh`, a label check and the Trivy scan against a throwaway `registry:3` service on the runner; no push, no signature, no secret. Evidence on 2026-10-20: `actionlint` clean; the merge step reproduced locally, with the installed `docker buildx` 0.37 against a local registry, from the two per-architecture indexes of the published `seal-key-server` (which uses the same OCI-archive plus `skopeo` flow): the merged digest `sha256:8609cbbe…5497134` equals the published `0.0.2` index byte for byte, so the merge is deterministic and keeps the provenance; `check-index.sh` passes on the published `sui-indexer` 0.0.13, `seal-key-server` 0.0.2 and `access-gate-gateway` 0.0.24 indexes and fails on a per-architecture index; `scripts/tests/check-index-test.sh` (9 cases, run in `rust-ci.yml`); Trivy 0.74.0 scanned a localhost registry image by digest with `TRIVY_NON_SSL`. **Not yet exercised on GitHub:** the native arm64 build, the OCI-archive export of this Dockerfile, `skopeo` pushes with the real credentials, signing and attestation of the merged digest, and the dry-run job itself; the next tag (or a manual dry run once this is on the default branch) is their test.
 
 ### F11 — Documentation drift
 
@@ -1300,25 +1300,25 @@ build time; the Trivy image scan may read the shipped lockfile (not verified).
 
 ### F19 — The clients do not use the freshness fields the indexer now serves
 
-**Severity:** Low   **Disposition:** RESOLVED (2026-10-20: access-gate-client 0.0.10 and seal-client 0.0.21, commits pending; released and consumed when the maintainer tags and the apps bump; Section D row ticked)
-**Where:** `access-gate-client/src/events.ts` and `seal-client/src/sealed-content.ts` (indexer readers);
+**Severity:** Low   **Disposition:** RESOLVED (2026-10-20: access-gate-client 0.0.10 and sealed-storage-client 0.0.21, commits pending; released and consumed when the maintainer tags and the apps bump; Section D row ticked)
+**Where:** `access-gate-client/src/events.ts` and `sealed-storage-client/src/sealed-content.ts` (indexer readers);
 `src/api.ts` `eventsPage` (`polledAt`, `latestCheckpoint`).
 
 **Issue:**
 
 - Head pages carry `polledAt` and `latestCheckpoint` (F2), but the indexer readers in access-gate-client
-  0.0.8 and seal-client 0.0.19 do not read them (no `polledAt`, `latestCheckpoint` or staleness check in
+  0.0.8 and sealed-storage-client 0.0.19 do not read them (no `polledAt`, `latestCheckpoint` or staleness check in
   `src/`). Apps fall back to the full node on errors and timeouts only, so a stuck indexer that still
-  answers `200` shows frozen history in treasury-ui and seal-ui until it recovers.
+  answers `200` shows frozen history in treasury-ui and sealed-storage-ui until it recovers.
 
-**Impact:** stale display data for as long as an ingest failure lasts. The status-page check (F2) makes the
+**Impact:** stale display data for as long as an ingest failure lasts. The status-ui check (F2) makes the
 outage visible to the operator, not to the apps. No funds or access are affected (display-only).
 
 **Remediation / evidence (client change, coordinated with the two client audits):** have `readIndexerEvents`
 treat a head page whose `polledAt` is older than N poll intervals as unavailable and fall back to the node;
 add a test per client. Deferred to the pre-mainnet gate; not a testnet blocker.
 
-**Remediation / evidence (2026-10-20, access-gate-client 0.0.10 `readIndexerEvents`, inherited by seal-client 0.0.21; commits pending):**
+**Remediation / evidence (2026-10-20, access-gate-client 0.0.10 `readIndexerEvents`, inherited by sealed-storage-client 0.0.21; commits pending):**
 
 - Rule: a **head page** (no `before`) is unavailable unless its `polledAt` is a positive safe integer (epoch ms) that is no
   older than `STALE_AFTER_MS` = 60 000 ms (4 poll intervals of 15 s) by the client's `Date.now()`. A missing, `null`
@@ -1332,17 +1332,17 @@ add a test per client. Deferred to the pre-mainnet gate; not a testnet blocker.
   safe, the indexer is simply unused). `IndexerSource.staleAfterMs` overrides the limit per call.
 - Tests, per client: access-gate-client `tests/events.test.ts` *a stale head page counts as unavailable (sui-indexer F19)* (fresh used; exactly 60 s used and
   60 s + 1 ms falls back with the `listEvents` spy proving the RPC fallback; null and missing `polledAt` fall back; non-number values fall back; future +60 s and +5 min used and
-  +5 min + 1 ms falls back; an older page ignores staleness; override; `readIndexerEvents` throws on stale) and seal-client `tests/sealed-content.test.ts` *a stale head page counts as
-  unavailable (sui-indexer F19, inherited from access-gate-client)* (the same cases through `listSealedContent`). Findings: access-gate-client audit F25, seal-client audit F26.
-- Rollout: the apps that pass `indexer` (treasury-ui, seal-ui) take the behaviour when they bump to access-gate-client `^0.0.10` / seal-client `^0.0.21`.
+  +5 min + 1 ms falls back; an older page ignores staleness; override; `readIndexerEvents` throws on stale) and sealed-storage-client `tests/sealed-content.test.ts` *a stale head page counts as
+  unavailable (sui-indexer F19, inherited from access-gate-client)* (the same cases through `listSealedContent`). Findings: access-gate-client audit F25, sealed-storage-client audit F26.
+- Rollout: the apps that pass `indexer` (treasury-ui, sealed-storage-ui) take the behaviour when they bump to access-gate-client `^0.0.10` / sealed-storage-client `^0.0.21`.
   The API serves `polledAt` on head pages only and `null` before the first poll (`crates/api/src/tests.rs`), which is what the clients' rule assumes.
 
-**Note (2026-10-18):** the change lives only in access-gate-client and seal-client (`readIndexerEvents`);
+**Note (2026-10-18):** the change lives only in access-gate-client and sealed-storage-client (`readIndexerEvents`);
 this repo already serves `polledAt` and `latestCheckpoint` and its contract tests pin them. Nothing to change
 here, so the finding stayed DEFERRED on those two repos. The two clients' choice of N (a multiple of the poll
 interval, 15 s by default) is theirs to make; recommendation: 4 intervals (60 s).
 
-**Re-verified 2026-10-19 (0.0.12, Rust):** Unchanged: the API still serves `polledAt` and `latestCheckpoint` (now from the heartbeat rows, F23), and the client change remains in access-gate-client and seal-client. Disposition unchanged (DEFERRED).
+**Re-verified 2026-10-19 (0.0.12, Rust):** Unchanged: the API still serves `polledAt` and `latestCheckpoint` (now from the heartbeat rows, F23), and the client change remains in access-gate-client and sealed-storage-client. Disposition unchanged (DEFERRED).
 
 **Re-verified 2026-10-20 (clients):** RESOLVED; see the remediation above. N chosen as recommended: 4 intervals (60 s). Nothing changes in this repository.
 
@@ -1493,7 +1493,7 @@ becomes a second input that must agree with the BCS.
 - Lost by design: 0.0.11's strict re-encode check (a layout drift made the event undecodable at ingest).
   Drift is now caught where the BCS is decoded — in the clients, which skip and count invalid rows.
 - **Parity re-run 2026-10-22 (read-only on the index; the events were produced for it on testnet):**
-  - The oracle is now the published client parsers (`@meddleware/access-gate-client` 0.0.10, `@meddleware/seal-client` 0.0.22), since the TypeScript path is gone. For
+  - The oracle is now the published client parsers (`@meddleware/access-gate-client` 0.0.10, `@meddleware/sealed-storage-client` 0.0.22), since the TypeScript path is gone. For
     every event the live index serves (`https://sui-indexer.meddleware.co.uk`, 0.0.16, PostgreSQL): decode the stored `bcs` with the parser; compare
     (kind, gate, commission) with (a) the full node's own `json` rendering of the same event (fetched per transaction), and (b) what the API derived: the `kinds`
     filter for each of the eight kinds, the `gate` filter for each gate, each `gate` x `kinds` pair, `/gates/{id}/stats` (minted, consumed, burned, commission sum) and
@@ -1838,7 +1838,7 @@ possible here. The image SBOM does not list the bundled JavaScript; from 0.0.10 
 | --- | --- | --- | --- | --- |
 | `@mysten/sui` | `^2.33.2` (2.35.0) | gRPC, BCS, address normalisation | clean | one copy across the clients; baseline `^2.33.1` (ADR-0001) |
 | `@meddleware/access-gate-client` | `^0.0.9` (0.0.9) | event parsing, deployments | clean | pre-v0.2: `^0.0.9` = exact; the latest published (2026-10-18) |
-| `@meddleware/seal-client` | `^0.0.20` (0.0.20) | sealed-content parsing, deployments | clean | the latest published; brings `@mysten/seal` 1.4.19 (bundled only if reachable) |
+| `@meddleware/sealed-storage-client` | `^0.0.20` (0.0.20) | sealed-content parsing, deployments | clean | the latest published; brings `@mysten/seal` 1.4.19 (bundled only if reachable) |
 | Base images | builder `node:24-trixie-slim@8ec5d755…`; runtime `distroless/nodejs24-debian13:nonroot@9eeb7f58…` (Node 24.21.0) | runtime | scanned by the CI Trivy gate | digest-pinned; Dependabot (docker, weekly, grouped) proposes bumps |
 
 **TS lens shared-dependency matrix row (this repo):**
@@ -1847,7 +1847,7 @@ possible here. The image SBOM does not list the bundled JavaScript; from 0.0.10 
 | --- | --- | --- | --- |
 | `@mysten/sui` | `^2.33.2` (baseline `^2.33.1`: same major.minor floor +1 patch; resolves 2.35.0) | — | — (bundled into the image; not a library) |
 | `@mysten/walrus`, `@mysten/walrus-wasm`, `@mysten/wallet-standard` | — | — | — |
-| `@mysten/seal`, `@mysten/bcs` | transitive via `seal-client` / `@mysten/sui` | — | — |
+| `@mysten/seal`, `@mysten/bcs` | transitive via `sealed-storage-client` / `@mysten/sui` | — | — |
 | `vue` | — | — | — |
 | `typescript` | — | `~6.0.3` | — |
 | `vitest` | — | `~5.0.2` | — |
@@ -1954,7 +1954,7 @@ It was not re-run in this pass (cosign not installed).
 | --- | --- | --- | --- | --- |
 | `config.rs` `DEFAULT_GRPC` (`config.ts` ≤ 0.0.11) | `https://fullnode.{testnet,mainnet}.sui.io:443` | default gRPC endpoints | Mysten | n/a |
 | `config.rs` `DEPLOYMENTS` (testnet; `accessGateDeployment('testnet')` ≤ 0.0.11) | `0xd7ddaa94…88c9` (original-id = published-at) | original ID (event filter and type check) | copied from access-gate-client 0.0.9 `ACCESS_GATE_DEPLOYMENTS` (the same value 0.0.8 carried), from the access-gate-sui publish record | Yes: 11 live events indexed by the Rust ingester (2026-10-19) |
-| `config.rs` `DEPLOYMENTS` (testnet; `sealPoliciesDeployment('testnet')` ≤ 0.0.11) | `0x0c8f7349…773d` (original-id = published-at) | original ID (event filter) | copied from seal-client 0.0.20 `SEAL_POLICIES_DEPLOYMENTS` | Yes: matches the client's record; still 0 sealed-content events (2026-10-19) |
+| `config.rs` `DEPLOYMENTS` (testnet; `sealPoliciesDeployment('testnet')` ≤ 0.0.11) | `0x0c8f7349…773d` (original-id = published-at) | original ID (event filter) | copied from sealed-storage-client 0.0.20 `SEAL_POLICIES_DEPLOYMENTS` | Yes: matches the client's record; still 0 sealed-content events (2026-10-19) |
 
 From 0.0.12 the defaults are a copy in `config.rs`, not an import of the client packages (no JS at runtime):
 a new client deployment record must be copied there (CLAUDE.md, README). The client-contract job pins the
@@ -2077,7 +2077,7 @@ Every test project that exists runs in CI. Up to 0.0.11: one vitest project (52 
 - [x] per-request cost independent of history size — F1 (0.0.5, `1973fca`)
 - [x] ingest survives an undecodable event; streams independent; staleness visible on `/healthz` and the
   status page — F2 (0.0.5; status check 2026-10-09). The clients read `polledAt` since access-gate-client
-  0.0.10 / seal-client 0.0.21 (F19, the pre-mainnet row below)
+  0.0.10 / sealed-storage-client 0.0.21 (F19, the pre-mainnet row below)
 - [x] no irreversible clear without confirmation; backup before a clear — F3 (0.0.5). Volume backups are
   not set: accepted for testnet (display-only; the apps fall back to the node for its recent window), and a
   maintainer item recorded in F3
@@ -2097,7 +2097,7 @@ Every test project that exists runs in CI. Up to 0.0.11: one vitest project (52 
   signatures (A18); the TS↔Rust parity check passed 19/19 (F24, B.SC-3)
 - [x] rate limit keyed on a trusted address; SIGTERM handled — A22, A24
 - [x] 0.0.12 released and rolled out — superseded by the settled 0.0.14 cutover and the live 0.0.15 (2026-10-22): the 0.0.12 and 0.0.13 images were never the end state (`config/images.yaml` went 0.0.11 → 0.0.13 → 0.0.14 → 0.0.15, tags `v0.0.12`–`v0.0.16`
-  exist), so the post-rollout checks of a two-container SQLite pod (the `.bak-pre-rust-*` copy, a pre-cutover cursor on SQLite) no longer apply; the equivalent live checks (events count and generation, `/healthz`, treasury-ui and seal-ui history, the status page's "Chain index") belong to the PostgreSQL
+  exist), so the post-rollout checks of a two-container SQLite pod (the `.bak-pre-rust-*` copy, a pre-cutover cursor on SQLite) no longer apply; the equivalent live checks (events count and generation, `/healthz`, treasury-ui and sealed-storage-ui history, the status page's "Chain index") belong to the PostgreSQL
   cutover row below and are the maintainer's report, not re-observed here. Ticked 2026-10-22.
 - [x] **0.0.14 (PostgreSQL) released and cut over** — D59/D60, F27–F32. Evidence: `config/images.yaml` pins the 0.0.14 digest `sha256:ed5f66b2…0566`; the maintainer reports (2026-10-20) that the cutover is done and settled and that the legacy SQLite
   Deployment, the import Job, the old PVC, the legacy NetworkPolicies and the server backup of the old volume are deleted. Not re-observed by this review (no cluster access); the per-step checks of the former runbook (import report, pre-cutover cursor, `/healthz`,
@@ -2109,12 +2109,12 @@ Every test project that exists runs in CI. Up to 0.0.11: one vitest project (52 
 - [x] SBOM includes the bundled dependencies (IMG-M8) — F18 (0.0.10, commit `4aab344`): second SPDX
   attestation from `npm sbom --omit dev`, checked by `scripts/check-sbom.mjs` and `tests/sbom.test.ts`;
   confirmed on the released 0.0.10 digest, 2026-10-18: two SPDX attestations (image SBOM, 17 packages; npm packages SBOM, 24 packages) verified with `cosign verify-attestation --type spdxjson`
-- [x] clients treat a stale head page as unavailable — F19 (2026-10-20): `readIndexerEvents` in access-gate-client 0.0.10 (shared by seal-client 0.0.21)
+- [x] clients treat a stale head page as unavailable — F19 (2026-10-20): `readIndexerEvents` in access-gate-client 0.0.10 (shared by sealed-storage-client 0.0.21)
   throws for a head page whose `polledAt` is missing, null or older than 60 s, so the node fallback runs; the future is tolerated up to 5 min; older pages are not
-  checked; per-client tests named in F19. Released (access-gate-client `v0.0.10`, seal-client `v0.0.21`); the apps took it by 2026-10-22
+  checked; per-client tests named in F19. Released (access-gate-client `v0.0.10`, sealed-storage-client `v0.0.21`); the apps took it by 2026-10-22
 - [ ] a mainnet deployment recorded in both clients (startup otherwise throws by design); then
   `NETWORK=mainnet` with the recorded chain id `35834a8a` — mainnet-blocked (access-gate-sui and
-  seal-policies-sui publication, `OPERATOR_TASKS.md` "Mainnet release custody")
+  sealed-storage-sui publication, `OPERATOR_TASKS.md` "Mainnet release custody")
 - [x] `noUncheckedIndexedAccess` enabled (F21) and the `Object.hasOwn` hygiene (F20) — 0.0.10, commit `4aab344`: flag on, `tsc` clean; `Map` lookups with tests
 - [ ] backup of the index with an offsite copy, and a restore drill that includes `sui_indexer` (F3, F28): the tier's `postgres-backup` CronJob covers the database
   once the tier is applied; the offsite copy (R2, encrypted to an offline key) is **not configured**, and until it is, losing the node loses the dump with the data —
@@ -2144,7 +2144,7 @@ Every test project that exists runs in CI. Up to 0.0.11: one vitest project (52 
   - Apps fall back on *errors*, but a stuck indexer (F2) or a slow one (F1) answers `200`.
   - The indexer half is done: head pages carry `polledAt` and `latestCheckpoint`, `/healthz` is per stream
     and the status page checks it (F2). The client half is done (2026-10-20): access-gate-client
-    (`listAccessGateEvents` indexer source) and seal-client (`listSealedContent`) treat a head page with a missing, null or older-than-60-s `polledAt` as unavailable
+    (`listAccessGateEvents` indexer source) and sealed-storage-client (`listSealedContent`) treat a head page with a missing, null or older-than-60-s `polledAt` as unavailable
     and fall back to the full node (F19).
 - **Shared storage tier (D59/D60).** The indexer is the tier's second consumer after the Ory stack and the template for the next: own database, an owner and a
   SELECT-only role, `verify-full` TLS, the CA as a ConfigMap, per-pod NetworkPolicy by label, the tier's dump as the backup. The same checklist (tier README "Onboarding")
@@ -2160,7 +2160,7 @@ Every test project that exists runs in CI. Up to 0.0.11: one vitest project (52 
 - **Chain-access layering.** The indexer is a consumer of the domain clients (ADR-0001): it decodes
   nothing itself and holds no package IDs of its own; a republication reaches it through the clients'
   deployment records and a confirmed rebind (F3, F7; exercised on 2026-10-09).
-- **Seal discovery is unauthenticated end to end.** seal-client F6 + F8 here: pointers come from the
+- **Seal discovery is unauthenticated end to end.** sealed-storage-client F6 + F8 here: pointers come from the
   full node or the indexer, and neither is authenticated against an independent source.
 - **Pre-v0.2 policy:** F1–F3 and F6 changed the API (added fields, redirects) in 0.0.5 as planned; the
   versioning is patch-only until go-live (0.0.12 for the Rust rewrite, a breaking internal change).
@@ -2305,7 +2305,7 @@ The four first-pass questions and OQ5-OQ7 are decided (OQ6 was superseded by OQ7
 ## Risks
 
 - **Silent staleness:** visible at the indexer (`/healthz`, the status page) and handled in the clients (a head page older than 60 s falls back to the node;
-  F2, F19). It reaches an app only once the app bumps to access-gate-client 0.0.10 / seal-client 0.0.21; a client clock more than 60 s ahead disables the indexer for that client.
+  F2, F19). It reaches an app only once the app bumps to access-gate-client 0.0.10 / sealed-storage-client 0.0.21; a client clock more than 60 s ahead disables the indexer for that client.
 - **Irreversible history loss:** volume loss with the node's retention at about 5½ days; the backup sits on
   the same volume (F3).
 - **Growth:** fixed in code (counters, canonical URLs); the Cloudflare zone rate rule is not set (F1,
@@ -2325,12 +2325,12 @@ The four first-pass questions and OQ5-OQ7 are decided (OQ6 was superseded by OQ7
 
 ## Re-verification log
 
-- 2026-10-20 — F19 closed in the clients (access-gate-client 0.0.10, seal-client 0.0.21; local commits, commit pending; nothing in this repository changed, no version bump).
+- 2026-10-20 — F19 closed in the clients (access-gate-client 0.0.10, sealed-storage-client 0.0.21; local commits, commit pending; nothing in this repository changed, no version bump).
   - **Scope:** the freshness fields the API serves (`crates/api/src/handler.rs` `EventsPage`, `crates/api/src/tests.rs` head-page assertions) and the two clients' indexer reader.
   - **Re-verified:** F19 → RESOLVED (evidence in the finding); F2 → RESOLVED (its last open item was F19); Section D row *clients treat a stale head page as unavailable* ticked; Section A row A1 caveat removed; the consumer-app row of the trust table, the cross-project theme, normative requirement 2, suggestion S2 and the risks list updated.
   - **Found:** nothing new in this repository.
   - **Totals F1-F32:** 19 RESOLVED, 1 MITIGATED (F3), 3 ADJUDICATED, 1 ACCEPTED-RISK (F28), 0 DEFERRED, 8 Positive (F12, F13, F14, F22, F27, F29, F30, F32).
-  - **Not run:** the Rust suites (no code changed here); the apps' bumps (consumers still resolve access-gate-client 0.0.9 / seal-client 0.0.20 until the clients are released).
+  - **Not run:** the Rust suites (no code changed here); the apps' bumps (consumers still resolve access-gate-client 0.0.9 / sealed-storage-client 0.0.20 until the clients are released).
 - 2026-10-20 — `0.0.15`: the one-off SQLite importer and `rusqlite` removed (local commit on top of `eb8e46a`; not released). No behaviour change for the API.
   - **Scope:** every file named in the Scope block; the repository was searched for `sqlite|import-sqlite|rusqlite|indexer.db|DB_PATH|VACUUM|WAL` and the workspace for `sqlite|indexer.db|import-sqlite|sui-indexer-data`.
   - **Re-verified:** F31 → RESOLVED (evidence in the finding); F18 (SBOM gate: no feature option, 116 / 175 crates, 11 cases) and F14 (Dockerfile in one build step) carry a note; F29 and F30 lose the importer wording; A16, A37 reworded; A41, A42, A48 N/A; B.1 loses the `rusqlite` row;
@@ -2405,13 +2405,13 @@ The four first-pass questions and OQ5-OQ7 are decided (OQ6 was superseded by OQ7
     `scripts/check-sbom.mjs` (CI `check` job and the release). F20: `Map` lookups for `NETWORK`. F21:
     `noUncheckedIndexedAccess` on, two `src/` and five test sites fixed. F11 residuals 1, 2 and the
     CHANGELOG part of 3.
-  - **Dependencies:** `@meddleware/access-gate-client` ^0.0.9 and `@meddleware/seal-client` ^0.0.20 (the
+  - **Dependencies:** `@meddleware/access-gate-client` ^0.0.9 and `@meddleware/sealed-storage-client` ^0.0.20 (the
     latest published); the bundle builds (603 kB) and the client-contract tests pass against them.
   - **Measured (local, Node 24.13.0):** 52/52 tests (api 19, ingest 22, config 5, chain 3, sbom 3); tsc
     (with the flag), eslint, `npm audit --audit-level=high` (0), `npm run build`, `check:licenses` and the
     SBOM check (23 production packages) all pass. `list-open-gates` for this repo: only mainnet and
     maintainer items remain, plus F19.
-  - **Left open:** F19 (the change is in access-gate-client and seal-client; see the note on F19), F3 volume
+  - **Left open:** F19 (the change is in access-gate-client and sealed-storage-client; see the note on F19), F3 volume
     backup and the Cloudflare zone rule (maintainer items), the mainnet deployment record, external review.
   - **Not run:** the publish workflow, `cosign`, Trivy, `actionlint`, the container smoke test (no daemon
     access here; GitHub Actions runs them).
@@ -2434,7 +2434,7 @@ The four first-pass questions and OQ5-OQ7 are decided (OQ6 was superseded by OQ7
     (`70fa4df`), 0.0.9 (`a3369bb`).
   - **Stale facts corrected:** package IDs (`access_gate` `0xd7ddaa94…88c9`, `seal_policies` `0x0c8f7349…773d`;
     the `0xa55789…` / `0x61c4aa…` packages are superseded and immutable), client versions (access-gate-client
-    0.0.8, seal-client 0.0.19), image digest and tag, Node and distroless bases, test count, line count,
+    0.0.8, sealed-storage-client 0.0.19), image digest and tag, Node and distroless bases, test count, line count,
     testnet retention (5½ days, not 3 months).
   - **Decisions recorded:** OQ1–OQ4 (Open questions); new event types need a fresh publish (F7).
   - **Not checked:** the Actions run history; `cosign verify` of the signer identity in this session (done for

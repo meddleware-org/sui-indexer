@@ -10,7 +10,7 @@ A read-indexer for display data. See [README.md](README.md) for the API and conf
   - Clients fall back to the full node.
 - **No JavaScript/TypeScript backend.** The service is Rust. TypeScript appears only in
   `tests/contract`, the CI job that drives the published client packages against the built binary.
-- **One parser.** BCS is decoded only by `@meddleware/access-gate-client` and `@meddleware/seal-client`.
+- **One parser.** BCS is decoded only by `@meddleware/access-gate-client` and `@meddleware/sealed-storage-client`.
   The ingester never decodes BCS and never copies their struct layouts (the BCS writer in
   `crates/testkit` encodes test fixtures only). It derives the stored columns this way:
   - `kind` from the event type: the address must be the stream's package **original id**, the module
@@ -19,7 +19,7 @@ A read-indexer for display data. See [README.md](README.md) for the API and conf
   - `gate_id` and `commission_mist` from the full node's `json` rendering (`read_mask` includes `json`).
   - The BCS bytes are stored unchanged.
 - **JSON fields relied on** (the Move field names; checked 2026-10-19 against
-  `access-gate-sui/sources/access_gate.move`, `seal-policies-sui/sources/sealed_content.move` and live
+  `access-gate-sui/sources/access_gate.move`, `sealed-storage-sui/sources/sealed_content.move` and live
   testnet events):
 
   | Struct (kind) | `gate_id` (`ID` → `"0x…"` hex) | `commission_mist` (`u64` → decimal string) |

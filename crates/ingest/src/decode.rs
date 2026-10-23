@@ -1,5 +1,5 @@
 //! Raw event → stored row, **without decoding BCS** ("one parser": the BCS layouts live only in
-//! `@meddleware/access-gate-client` and `@meddleware/seal-client`, which decode every served row).
+//! `@meddleware/access-gate-client` and `@meddleware/sealed-storage-client`, which decode every served row).
 //!
 //! - `kind` comes from the event type's struct name (the event must be typed at the stream's
 //!   package original id and module, exactly as the client parsers require).

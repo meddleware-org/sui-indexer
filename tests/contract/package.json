@@ -2,7 +2,7 @@
   "name": "sui-indexer-contract-tests",
   "version": "0.0.0",
   "private": true,
-  "description": "CI only: the published client packages (access-gate-client, seal-client) against the built `api` binary. Test tooling, never shipped.",
+  "description": "CI only: the published client packages (access-gate-client, sealed-storage-client) against the built `api` binary. Test tooling, never shipped.",
   "license": "0BSD",
   "type": "module",
   "engines": {
@@ -13,7 +13,7 @@
   },
   "devDependencies": {
     "@meddleware/access-gate-client": "0.0.9",
-    "@meddleware/seal-client": "0.0.20",
+    "@meddleware/sealed-storage-client": "0.0.20",
     "@mysten/sui": "2.36.0",
     "vitest": "5.0.5"
   }

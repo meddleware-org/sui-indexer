@@ -1,5 +1,5 @@
 // Client contract: the real `listAccessGateEvents` (@meddleware/access-gate-client) and
-// `listSealedContent` (@meddleware/seal-client) read the built `api` binary over HTTP. The database is a
+// `listSealedContent` (@meddleware/sealed-storage-client) read the built `api` binary over HTTP. The database is a
 // throwaway PostgreSQL database with the two production roles, seeded by the testkit's `seed-fixture`
 // (events BCS-encoded independently of the client parsers); the API runs as the SELECT-only role.
 //
@@ -9,7 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { resolve } from 'node:path'
 import { listAccessGateEvents } from '@meddleware/access-gate-client'
-import { listSealedContent } from '@meddleware/seal-client'
+import { listSealedContent } from '@meddleware/sealed-storage-client'
 import { normalizeSuiAddress } from '@mysten/sui/utils'
 
 const API_BIN = resolve(process.env.API_BIN ?? '../../target/release/api')
@@ -96,7 +96,7 @@ describe('client contract (real client packages against the api binary)', () => 
     expect(page.events.map((e) => e.checkpoint)).toEqual(['5', '4', '3', '2', '1'])
   })
 
-  it('seal-client lists sealed content through the indexer', async () => {
+  it('sealed-storage-client lists sealed content through the indexer', async () => {
     const page = await listSealedContent(noRpc, { originalId: SEAL, gateId: GATE_A, indexer: indexer(`${BASE}/`) })
     expect(page.source).toBe('indexer')
     expect(page.pointers.map((p) => p.label)).toEqual(['two', 'one'])

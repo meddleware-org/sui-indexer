@@ -22,7 +22,7 @@ pub struct Deployment {
 }
 
 /// The recorded deployments of the published client packages (`@meddleware/access-gate-client`
-/// 0.0.9 `ACCESS_GATE_DEPLOYMENTS`, `@meddleware/seal-client` 0.0.20 `SEAL_POLICIES_DEPLOYMENTS`).
+/// 0.0.9 `ACCESS_GATE_DEPLOYMENTS`, `@meddleware/sealed-storage-client` 0.0.20 `SEAL_POLICIES_DEPLOYMENTS`).
 /// Keep in step with them: a new deployment there is a new default here.
 pub const DEPLOYMENTS: &[Deployment] = &[Deployment {
     network: "testnet",

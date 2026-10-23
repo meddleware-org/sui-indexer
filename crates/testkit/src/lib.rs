@@ -1,7 +1,7 @@
 //! Event fixtures for the sui-indexer tests and the CI client-contract job.
 //!
 //! The BCS bytes are encoded here, independently of the client parsers, from the Move structs
-//! (`access-gate-sui/sources/access_gate.move`, `seal-policies-sui/sources/sealed_content.move`),
+//! (`access-gate-sui/sources/access_gate.move`, `sealed-storage-sui/sources/sealed_content.move`),
 //! and the `json` renderings use the full node's form (field names of the Move struct, `ID` and
 //! `address` as `0x` hex, `u64` as decimal strings). Test code only: the ingester never decodes BCS.
 

@@ -20,7 +20,7 @@ back to the full node when it is unavailable.
     (below) is what the public sees.
 - **Same decoding as the apps.** The ingester does not decode BCS. It takes the event kind from the type
   name and the gate and commission from the full node's JSON rendering, and stores the BCS verbatim; the
-  apps decode it with `@meddleware/access-gate-client` and `@meddleware/seal-client`, as they decode
+  apps decode it with `@meddleware/access-gate-client` and `@meddleware/sealed-storage-client`, as they decode
   full-node events.
 - **Cheap under load.**
   - Older pages never change and are served `immutable`.
@@ -66,7 +66,7 @@ All routes are `GET` (and `HEAD`), and responses are JSON with `Access-Control-A
   values; only the order of parameters is left as sent (a bounded number of permutations).
 - **Freshness.** Head pages carry `polledAt` (epoch ms of the stream's last successful poll) and
   `latestCheckpoint`. Older pages are immutable and carry neither.
-  The client packages (access-gate-client 0.0.10, seal-client 0.0.21) treat a head page whose `polledAt` is missing,
+  The client packages (access-gate-client 0.0.10, sealed-storage-client 0.0.21) treat a head page whose `polledAt` is missing,
   `null` or older than 60 s as unavailable and read the full node instead.
 - **Transport.** 5 s to receive the request headers, 10 s per request, at most 1024 open connections and
   a 32 KiB request head; `OPTIONS` preflight answered, other methods `405`.
