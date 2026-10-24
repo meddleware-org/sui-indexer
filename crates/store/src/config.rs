@@ -212,7 +212,7 @@ impl IngestConfig {
         let seal_original_id = package_id(env, "SEAL_ORIGINAL_ID", || {
             deployment(&network)
                 .map(|d| d.seal_original_id.to_owned())
-                .ok_or_else(|| ConfigError(format!("no seal_policies deployment recorded for {network}")))
+                .ok_or_else(|| ConfigError(format!("no sealed_storage deployment recorded for {network}")))
         })?;
         let reindex_confirm = reindex_confirm(env)?;
         Ok(IngestConfig {

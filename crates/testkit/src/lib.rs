@@ -19,7 +19,7 @@ pub fn addr(s: &str) -> String {
 pub fn ag() -> String {
     addr("0xa1")
 }
-/// The fixtures' `seal_policies` package.
+/// The fixtures' `sealed_storage` package.
 pub fn seal() -> String {
     addr("0x5e")
 }

@@ -72,7 +72,7 @@ pub async fn start<S: EventSource>(cfg: &IngestConfig, source: S, log: Logger) -
         }
     }
     log(&format!(
-        "sui-indexer ingest {} {} — access_gate {}, seal_policies {}, generation {}",
+        "sui-indexer ingest {} {} — access_gate {}, sealed_storage {}, generation {}",
         env!("CARGO_PKG_VERSION"),
         cfg.network,
         cfg.access_gate_original_id,

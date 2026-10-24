@@ -2500,3 +2500,4 @@ The four first-pass questions and OQ5-OQ7 are decided (OQ6 was superseded by OQ7
 - [x] 2026-10-20 (F19, clients): finding header ↔ body: F2 and F19 RESOLVED in the header, the table and the body; Section D ↔ dispositions: the stale-head-page row ticked with evidence; the Status block, the Executive summary posture and the findings table agree (19 / 1 / 3 / 1 / 0 / 8 for F1-F32); re-verification log entry added.
 - [x] 2026-10-22 (close-out): Section D rows (0.0.12, 0.0.14, 0.0.15, zone rule) ticked with evidence; Deployment status updated; log entry added; counts unchanged.
 - [x] 2026-10-22 (F24 parity): the Section D parity box ticked with evidence; F24, C.2, A40, B.SC-3 and the normative item 7 updated; log entry added; counts unchanged.
+- 2026-10-24 — identifier alignment (`docs/architecture/ADR-0004-identifier-alignment.md`): log/error text names `sealed_storage`; the event filters use module names and original ids, which did not change.
