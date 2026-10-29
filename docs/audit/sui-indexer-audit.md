@@ -21,6 +21,7 @@ the findings keep their TS-era text and carry a 2026-10-19 re-verification again
 - AUDIT_TEMPLATE_RUST.md (2026-10-08) — from 0.0.12 (the service is Rust)
 - AUDIT_TEMPLATE_SUI_CLIENT.md (2026-10-08) — chain reads: event filters, package IDs, type matching
 - AUDIT_TEMPLATE_IMG.md (2026-10-08) — `Dockerfile` + `docker-publish.yml` + the cluster manifests
+- AUDIT_TEMPLATE_DB.md (2026-10-25) — PostgreSQL tier, two roles (applied 2026-10-25)
 
 Not triggered: SUI (no Move code), SEAL, WALRUS, VUE, AUTH (no authentication: public read-only
 data), OPS (no signing or irreversible scripts), GO, WORKERS, PROXY (it serves its own data; it
@@ -2501,3 +2502,4 @@ The four first-pass questions and OQ5-OQ7 are decided (OQ6 was superseded by OQ7
 - [x] 2026-10-22 (close-out): Section D rows (0.0.12, 0.0.14, 0.0.15, zone rule) ticked with evidence; Deployment status updated; log entry added; counts unchanged.
 - [x] 2026-10-22 (F24 parity): the Section D parity box ticked with evidence; F24, C.2, A40, B.SC-3 and the normative item 7 updated; log entry added; counts unchanged.
 - 2026-10-24 — identifier alignment (`docs/architecture/ADR-0004-identifier-alignment.md`): log/error text names `sealed_storage`; the event filters use module names and original ids, which did not change.
+- 2026-10-25 — DB lens applied (no code change). DB-M1 holds (F30: embedded, checksummed, advisory-locked migrations, newer schema refused); DB-M2 stated (CLAUDE.md *Schema identity*); DB-M3 holds (F27: owner `ingest`, SELECT-only `api`, role tests, cross-database refusal); DB-M4 holds (F13, parameterised; plan tests in `index_tests.rs`); DB-M5 holds (all rows are public chain data; no internal column); DB-M6 holds (CHECK/NOT NULL per *Schema identity*; ordered ids; unique event keys); DB-M7 holds (F32); DB-M8 holds (API `503` before the schema and on database loss, recovery tested); DB-M9 open — the offsite copy and a restore drill of `sui_indexer` (OPERATOR_TASKS, pre-mainnet; the index is rebuildable only within the node's ~5½-day retention); DB-M10 holds (no personal data: request IPs are not stored).
