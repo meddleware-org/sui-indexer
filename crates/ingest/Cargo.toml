@@ -22,14 +22,14 @@ sui-indexer-store = { path = "../store" }
 sui-rpc = { version = "=0.4.0", default-features = false }
 tonic = { version = "=0.14.9", default-features = false }
 prost-types = "=0.14.4"
-tokio = { version = "=1.53.3", features = ["rt", "macros", "time", "signal"] }
+tokio = { version = "=1.54.1", features = ["rt", "macros", "time", "signal"] }
 base64 = "=0.23.1"
 bs58 = { version = "=0.5.1", default-features = false, features = ["alloc"] }
 serde_json = "=1.0.154"
 
 [dev-dependencies]
 sui-indexer-store = { path = "../store", features = ["testing"] }
-tokio = { version = "=1.53.3", features = ["rt", "macros", "time", "net", "test-util"] }
+tokio = { version = "=1.54.1", features = ["rt", "macros", "time", "net", "test-util"] }
 # A local LedgerService stub for the gRPC source tests (generated server of sui-rpc).
 tonic = { version = "=0.14.9", default-features = false, features = ["server", "router", "transport", "codegen"] }
 tokio-stream = { version = "=0.1.19", features = ["net"] }
