@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.19] - 2026-10-30
+
+### Security
+
+- `tonic` 0.14.9 (was 0.14.6), which moves `zstd` to 0.14.3 and `zstd-safe` to 8.2.0 for RUSTSEC-2026-0391, RUSTSEC-2026-0398 and the legacy-frame decompression advisory. The gRPC client negotiates zstd with the full node, so the update is taken rather than waived. Also current lockfile versions (ctutils 0.4.7, webpki-roots 1.0.11, and others). No behaviour change.
+
 ## [0.0.18] - 2026-10-24
 
 ### Changed

@@ -89,7 +89,7 @@ packages against the binary (lockfile committed, Dependabot-tracked, never shipp
   `VITE_INDEXER_URL` (`https://sui-indexer.meddleware.dev` since 2026-10-27, formerly `.co.uk`). Decoding happens in access-gate-client
   (0.0.8) and sealed-storage-client (0.0.19).
 
-**Review date:** 2026-10-03; re-verified 2026-10-09 (code at `a3369bb` = tag `v0.0.9`); code gates closed in 0.0.10 (`5251f38`), released and deployed 2026-10-18; re-verified 2026-10-19 against the Rust rewrite (0.0.12, local commits, not released); F25 fixed in 0.0.13 (local commit); re-verified 2026-10-20 against 0.0.14 (PostgreSQL storage, local commits, not released); 0.0.15 (importer removed) re-verified the same day
+**Review date:** 2026-10-03; re-verified 2026-10-09 (code at `a3369bb` = tag `v0.0.9`); code gates closed in 0.0.10 (`5251f38`), released and deployed 2026-10-18; re-verified 2026-10-19 against the Rust rewrite (0.0.12, local commits, not released); F25 fixed in 0.0.13 (local commit); re-verified 2026-10-20 against 0.0.14 (PostgreSQL storage, local commits, not released); 0.0.15 (importer removed) re-verified the same day; 0.0.19 re-verified 2026-10-30 (zstd advisories fixed through tonic 0.14.9; cargo-deny clean)
 **Reviewer:** Internal review
 **Severity ceiling:** Medium.
 
