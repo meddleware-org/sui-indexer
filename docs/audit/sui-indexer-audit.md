@@ -76,7 +76,7 @@ packages against the binary (lockfile committed, Dependabot-tracked, never shipp
   `sha256:aea58153…1704` (checked with `skopeo` on both registries, created 2026-10-09 17:41Z). It is
   the digest in `config/images.yaml` and in the `post-bootstrap/sui-indexer` overlay, and all deployed
   images were cosign-verified on 2026-10-09 (`bootstrap/images/verify-digests.sh`, 16/16).
-- Live at `https://sui-indexer.meddleware.co.uk`: `/healthz` returned `ok: true` for both streams with
+- Live (then at `https://sui-indexer.meddleware.co.uk`; moved to `https://sui-indexer.meddleware.dev` with the machine zone, 2026-10-27): `/healthz` returned `ok: true` for both streams with
   polls 5–6 s old (2026-10-09 22:49Z). It indexes the republished testnet packages (`access_gate`
   `0xd7ddaa94…88c9`, `seal_policies` `0x0c8f7349…773d`). `/v1/testnet/coverage` shows 3 `access-gate`
   events (from checkpoint 392921227), 0 `sealed-content` events, 0 undecodable, 0 gaps. A new-gate stats
@@ -86,7 +86,7 @@ packages against the binary (lockfile committed, Dependabot-tracked, never shipp
   (`OPERATOR_TASKS.md`, done 2026-10-09).
 - Manifests: `post-bootstrap/sui-indexer` in the infrastructure workspace (read for this pass, see Scope).
 - Consumers: treasury-ui (`useTreasuryActivity`) and sealed-storage-ui (`discoverSealedContent`) through
-  `VITE_INDEXER_URL` (`https://sui-indexer.meddleware.co.uk`). Decoding happens in access-gate-client
+  `VITE_INDEXER_URL` (`https://sui-indexer.meddleware.dev` since 2026-10-27, formerly `.co.uk`). Decoding happens in access-gate-client
   (0.0.8) and sealed-storage-client (0.0.19).
 
 **Review date:** 2026-10-03; re-verified 2026-10-09 (code at `a3369bb` = tag `v0.0.9`); code gates closed in 0.0.10 (`5251f38`), released and deployed 2026-10-18; re-verified 2026-10-19 against the Rust rewrite (0.0.12, local commits, not released); F25 fixed in 0.0.13 (local commit); re-verified 2026-10-20 against 0.0.14 (PostgreSQL storage, local commits, not released); 0.0.15 (importer removed) re-verified the same day
