@@ -12,9 +12,9 @@
     "test": "vitest run"
   },
   "devDependencies": {
-    "@meddleware/access-gate-client": "0.0.9",
-    "@meddleware/sealed-storage-client": "0.0.24",
-    "@mysten/sui": "2.37.0",
+    "@meddleware/access-gate-client": "0.0.12",
+    "@meddleware/sealed-storage-client": "0.0.25",
+    "@mysten/sui": "2.38.0",
     "vitest": "5.0.5"
   }
 }
