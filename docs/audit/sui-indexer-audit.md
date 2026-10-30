@@ -2117,9 +2117,8 @@ Every test project that exists runs in CI. Up to 0.0.11: one vitest project (52 
   `NETWORK=mainnet` with the recorded chain id `35834a8a` — mainnet-blocked (access-gate-sui and
   sealed-storage-sui publication, `OPERATOR_TASKS.md` "Mainnet release custody")
 - [x] `noUncheckedIndexedAccess` enabled (F21) and the `Object.hasOwn` hygiene (F20) — 0.0.10, commit `4aab344`: flag on, `tsc` clean; `Map` lookups with tests
-- [ ] backup of the index with an offsite copy, and a restore drill that includes `sui_indexer` (F3, F28): the tier's `postgres-backup` CronJob covers the database
-  once the tier is applied; the offsite copy (R2, encrypted to an offline key) is **not configured**, and until it is, losing the node loses the dump with the data —
-  maintainer item (`OPERATOR_TASKS.md` "Database tier" steps 4-5); supersedes the volume-snapshot row for `sui-indexer-data`, which no longer exists
+- [x] backup of the index with an offsite copy, and a restore drill that includes `sui_indexer` (F3, F28): **done 2026-10-30** — the tier's `postgres-backup` CronJob covers the database,
+  the offsite copy (R2, encrypted to an offline key) is live, and restore drills from the in-cluster and the offsite sets restored `sui_indexer` (8 tables, matching the manifest); supersedes the volume-snapshot row for `sui-indexer-data`, which no longer exists
 - [x] Cloudflare zone rate-limit rule (F6) — **decided 2026-10-22: not needed.** The Ingress per-IP limit (20 r/s, burst 80, `429`) above the app's own (10 r/s, burst 40) and the edge cache bound the origin load; the free plan's single rule stays with the token service. No change to make.
 - [ ] external review — maintainer item
 - [x] chain-identity check on `GRPC_URL` — F8, F16 (0.0.6)
@@ -2503,3 +2502,4 @@ The four first-pass questions and OQ5-OQ7 are decided (OQ6 was superseded by OQ7
 - [x] 2026-10-22 (F24 parity): the Section D parity box ticked with evidence; F24, C.2, A40, B.SC-3 and the normative item 7 updated; log entry added; counts unchanged.
 - 2026-10-24 — identifier alignment (`docs/architecture/ADR-0004-identifier-alignment.md`): log/error text names `sealed_storage`; the event filters use module names and original ids, which did not change.
 - 2026-10-25 — DB lens applied (no code change). DB-M1 holds (F30: embedded, checksummed, advisory-locked migrations, newer schema refused); DB-M2 stated (CLAUDE.md *Schema identity*); DB-M3 holds (F27: owner `ingest`, SELECT-only `api`, role tests, cross-database refusal); DB-M4 holds (F13, parameterised; plan tests in `index_tests.rs`); DB-M5 holds (all rows are public chain data; no internal column); DB-M6 holds (CHECK/NOT NULL per *Schema identity*; ordered ids; unique event keys); DB-M7 holds (F32); DB-M8 holds (API `503` before the schema and on database loss, recovery tested); DB-M9 open — the offsite copy and a restore drill of `sui_indexer` (OPERATOR_TASKS, pre-mainnet; the index is rebuildable only within the node's ~5½-day retention); DB-M10 holds (no personal data: request IPs are not stored).
+- 2026-10-30 — F3/F28 backup gate closed: offsite R2 copy live; restore drills (in-cluster and offsite) restored `sui_indexer` with all 8 tables.
