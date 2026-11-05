@@ -17,7 +17,7 @@ role**) + container image. Up to 0.0.11 it was a TS service (Node `node:http` + 
 the findings keep their TS-era text and carry a 2026-10-19 re-verification against the Rust code.
 **Template:**
 
-- AUDIT_TEMPLATE.md (2026-10-08)
+- AUDIT_TEMPLATE.md (2026-11-01)
 - AUDIT_TEMPLATE_RUST.md (2026-10-08) — from 0.0.12 (the service is Rust)
 - AUDIT_TEMPLATE_SUI_CLIENT.md (2026-10-08) — chain reads: event filters, package IDs, type matching
 - AUDIT_TEMPLATE_IMG.md (2026-10-08) — `Dockerfile` + `docker-publish.yml` + the cluster manifests
