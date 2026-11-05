@@ -1,6 +1,6 @@
 # Security Audit — `sui-indexer`
 
-**Classification:** Internal security review (re-verified 2026-10-09; code gates closed 2026-10-18; re-verified 2026-10-19 against the Rust rewrite 0.0.12; F25 closed in 0.0.13; re-verified 2026-10-20 against the PostgreSQL storage 0.0.14; SQLite importer removed in 0.0.15, 2026-10-20 — awaiting external review)
+**Classification:** Internal security review (re-verified 2026-10-09; code gates closed 2026-10-18; re-verified 2026-10-19 against the Rust rewrite 0.0.12; F25 closed in 0.0.13; re-verified 2026-10-20 against the PostgreSQL storage 0.0.14; SQLite importer removed in 0.0.15, 2026-10-20; delta review 2026-11-05 of 0.0.16–0.0.19 — awaiting external review)
 **Project:** sui-indexer — a lean read-indexer for display data.
 
 - It polls two streams from a Sui full node over gRPC into PostgreSQL (the platform's shared database tier; SQLite up to 0.0.13):
@@ -32,6 +32,7 @@ packages against the binary (lockfile committed, Dependabot-tracked, never shipp
 
 **Deployment status:**
 
+- **Current (2026-11-05): `0.0.19` is released and live** (tag `v0.0.19`, 2026-10-30; the workspace pins it in `config/images.yaml`; `docs/STATE.md` records 0.0.19 live since 2026-10-30 and 0.0.18 live since 2026-10-24 — read from the state file, not re-observed by this review). 0.0.16 (rustls-webpki, webpki-roots), 0.0.17 (ctutils), 0.0.18 (log and error text name `sealed_storage`) and 0.0.19 (tonic 0.14.9 / zstd) change no behaviour (F33). The bullets below are the earlier history, kept as written; where they say a version is "not yet pinned", read this bullet.
 - **2026-10-22: `0.0.15` is released and live; `0.0.16` is released.** Tag `v0.0.15` (the SQLite importer removed) is pinned in the workspace `config/images.yaml` (`tag: "0.0.15"`, digest `sha256:311a8ef7…c3e`) and rolled out
   (the maintainer's and the orchestrator's report; not re-observed by this review). Tag `v0.0.16` = `e45e941` (2026-10-22; the `Publish (Docker)` run for the tag succeeded) updates `rustls-webpki` to 0.103.16 and `webpki-roots` to 1.0.10 for
   RUSTSEC-2026-0382 and RUSTSEC-2026-0381 (certificate paths through distrusted emSign intermediates could be accepted; this affects the TLS connection to the full node over gRPC; the database connection pins its own CA). Not yet pinned in `config/images.yaml`.
@@ -89,7 +90,7 @@ packages against the binary (lockfile committed, Dependabot-tracked, never shipp
   `VITE_INDEXER_URL` (`https://sui-indexer.meddleware.dev` since 2026-10-27, formerly `.co.uk`). Decoding happens in access-gate-client
   (0.0.8) and sealed-storage-client (0.0.19).
 
-**Review date:** 2026-10-03; re-verified 2026-10-09 (code at `a3369bb` = tag `v0.0.9`); code gates closed in 0.0.10 (`5251f38`), released and deployed 2026-10-18; re-verified 2026-10-19 against the Rust rewrite (0.0.12, local commits, not released); F25 fixed in 0.0.13 (local commit); re-verified 2026-10-20 against 0.0.14 (PostgreSQL storage, local commits, not released); 0.0.15 (importer removed) re-verified the same day; 0.0.19 re-verified 2026-10-30 (zstd advisories fixed through tonic 0.14.9; cargo-deny clean)
+**Review date:** 2026-10-03; re-verified 2026-10-09 (code at `a3369bb` = tag `v0.0.9`); code gates closed in 0.0.10 (`5251f38`), released and deployed 2026-10-18; re-verified 2026-10-19 against the Rust rewrite (0.0.12, local commits, not released); F25 fixed in 0.0.13 (local commit); re-verified 2026-10-20 against 0.0.14 (PostgreSQL storage, local commits, not released); 0.0.15 (importer removed) re-verified the same day; 0.0.16–0.0.19 released 2026-10-22 to 2026-10-30 (F33: rustls-webpki, ctutils, zstd advisories fixed by lockfile updates) and reviewed in the delta entry of 2026-11-05
 **Reviewer:** Internal review
 **Severity ceiling:** Medium.
 
@@ -1745,6 +1746,14 @@ mentions in the docs are history (this audit's older sections and log, the CHANG
   the real Kratos, Hydra and Keto images were proved against `verify-full` (and refused a wrong CA, a host name outside the SANs and a missing CA). A hostname-mismatch refusal is verified by rustls' contract and by the CA test, not by a dedicated test (the test server's certificate carries
   the names it is reached by).
 
+### F33 — Advisories in transitive crates of the gRPC client path, fixed by release (0.0.16–0.0.19)
+
+**Severity:** Low   **Disposition:** RESOLVED (0.0.16, 0.0.17, 0.0.19)
+**Where:** `Cargo.lock` (`rustls-webpki`, `webpki-roots`, `ctutils`, `tonic` → `zstd`/`zstd-safe`); `deny.toml`; the `rust-ci.yml` cargo-deny step.
+**Issue:** three batches of RustSec advisories reached the dependency graph after the 0.0.15 audit pass and were fixed by lockfile updates with no source change: `rustls-webpki` 0.103.16 and `webpki-roots` 1.0.10 for RUSTSEC-2026-0382/-0381 (certificate paths through distrusted emSign intermediates could be accepted on the TLS connection to the full node; 0.0.16, 2026-10-22); `ctutils` 0.4.5 for RUSTSEC-2026-0385 (0.0.17, 2026-10-24); `tonic` 0.14.9, which moves `zstd` to 0.14.3 and `zstd-safe` to 8.2.0 for RUSTSEC-2026-0391, RUSTSEC-2026-0398 and the legacy-frame decompression advisory (0.0.19, 2026-10-30; the gRPC client negotiates zstd with the full node, so the decompressor is reachable from a malicious or compromised node's responses).
+**Impact:** the indexer reads from a full node it does not control the wire to (public fullnode); a decompression or certificate-path flaw is a way for that peer to crash or mislead the ingester. Display data only, and the apps fall back to the full node (the F2 posture), so the residual is availability of the display index.
+**Remediation / evidence:** the three releases; `cargo deny check` clean on 2026-11-05 at `main` (advisories, bans, licences, sources); the lockfile resolves `zstd` 0.14.3 (read 2026-11-05). The class recurs by nature (a weekly Dependabot cargo group and the CI cargo-deny step catch it; the tag's own CI run gates the release), so it is recorded as a standing control, not a one-off: nothing in this repository's code needs to change.
+
 ---
 
 ## Section A — Invariant verification matrix
@@ -2473,6 +2482,7 @@ The four first-pass questions and OQ5-OQ7 are decided (OQ6 was superseded by OQ7
   - **Method and result:** F24 ("Parity re-run 2026-10-22"): the published client parsers as the oracle, the full node's own `json` as the second input, the API's filters and stats as the derived side. **43 events identical**: 34 access_gate events and 2 sealed-content pointers on the deployed index (0.0.16), 7 on a scratch publication through a local `ingest` + `api` for the two kinds that cannot be produced on the live package. No finding.
   - **Events generated** with the maintenance runner `0xbf4bd853…424f` (testnet, about 0.05 SUI): gate creations, a purchase, a consume with auto-burn, a voluntary `burn`, two `make_gate_immutable`, two `sealed_content::publish` (digests in F24). Not produced: `GateMadeFree` and `PlatformMigrated` on the live package (a 1 SUI fee, and the maintainer's `PlatformAdminCap`), and `PlatformConfigUpdated` (two exist from the maintainer's re-pricing, 2 of 2 identical).
   - **Counts unchanged** (19 RESOLVED, 1 MITIGATED, 3 ADJUDICATED, 1 ACCEPTED-RISK, 0 DEFERRED, 8 Positive for F1–F32). F24 stays ADJUDICATED (the decision is the same; the gate that backed it is closed). The comparison script was run from a scratch directory and is not kept (it needs a funded key to generate events).
+- 2026-11-05 — delta review of 0.0.16–0.0.19 (the last substantive entry was the 2026-10-22 close-out; the 2026-10-30 entries closed the backup gate and moved the host). Read `git diff 05daa40~1..HEAD` for source: the only source lines that changed are log/error text and comments (`crates/ingest/src/lib.rs`, `crates/store/src/config.rs`, `crates/testkit/src/lib.rs`) plus manifests, `Dockerfile` and the contract-test `package.json`. Ran, with a pinned throwaway PostgreSQL 18 over `verify-full` TLS (`DOCKER=podman bash scripts/test-postgres.sh start`, `REQUIRE_TEST_DATABASE=1`): `cargo test --workspace --locked` — 144 tests (api 43, ingest 36, store 65), 0 failed, none skipped or ignored; `cargo fmt --check` and `cargo clippy --workspace --all-targets --locked -- -D warnings` clean; `cargo deny check` (advisories, bans, licences, sources ok). New F33 (the three advisory batches fixed by lockfile releases; RESOLVED, recorded as a standing control). Corrected the Deployment status, which still called 0.0.15 live and 0.0.16 unpinned (a current bullet is on top). Not run: the `tests/contract` client suite (it pins the published clients and needs the Node toolchain; the Dependabot bump of its `package.json` was reviewed by diff only), `scripts/smoke.sh` and the SBOM gate tests (container build). Lens check: A11Y not triggered (no UI); DB and RUST rows unchanged; base re-cited to the 2026-11-01 registry (it gained the A11Y code only). Counts: the 2026-10-22 counts plus 1 RESOLVED (F33): 20 RESOLVED, 1 MITIGATED (F3), 3 ADJUDICATED, 1 ACCEPTED-RISK (F28), 0 DEFERRED, 8 Positive — the 2026-10-30 backup entry did not restate F3/F28, so those two stay as last stated.
 
 ## Pre-save consistency checklist (this pass)
 
