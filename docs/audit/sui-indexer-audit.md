@@ -32,6 +32,7 @@ packages against the binary (lockfile committed, Dependabot-tracked, never shipp
 
 **Deployment status:**
 
+- **Latest (2026-11-06): `0.0.20` is released and deployed** (CI green, signed; pinned `sha256:f044546d…4164` by consensus, the running pods' image digest equals it): the runtime base digest refreshed and dev tools updated, no code change. The bullets below are earlier history.
 - **Current (2026-11-05): `0.0.19` is released and live** (tag `v0.0.19`, 2026-10-30; the workspace pins it in `config/images.yaml`; `docs/STATE.md` records 0.0.19 live since 2026-10-30 and 0.0.18 live since 2026-10-24 — read from the state file, not re-observed by this review). 0.0.16 (rustls-webpki, webpki-roots), 0.0.17 (ctutils), 0.0.18 (log and error text name `sealed_storage`) and 0.0.19 (tonic 0.14.9 / zstd) change no behaviour (F33). The bullets below are the earlier history, kept as written; where they say a version is "not yet pinned", read this bullet.
 - **2026-10-22: `0.0.15` is released and live; `0.0.16` is released.** Tag `v0.0.15` (the SQLite importer removed) is pinned in the workspace `config/images.yaml` (`tag: "0.0.15"`, digest `sha256:311a8ef7…c3e`) and rolled out
   (the maintainer's and the orchestrator's report; not re-observed by this review). Tag `v0.0.16` = `e45e941` (2026-10-22; the `Publish (Docker)` run for the tag succeeded) updates `rustls-webpki` to 0.103.16 and `webpki-roots` to 1.0.10 for
