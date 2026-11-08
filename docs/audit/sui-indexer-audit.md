@@ -2130,7 +2130,7 @@ Every test project that exists runs in CI. Up to 0.0.11: one vitest project (52 
 - [x] backup of the index with an offsite copy, and a restore drill that includes `sui_indexer` (F3, F28): **done 2026-10-30** — the tier's `postgres-backup` CronJob covers the database,
   the offsite copy (R2, encrypted to an offline key) is live, and restore drills from the in-cluster and the offsite sets restored `sui_indexer` (8 tables, matching the manifest); supersedes the volume-snapshot row for `sui-indexer-data`, which no longer exists
 - [x] Cloudflare zone rate-limit rule (F6) — **decided 2026-10-22: not needed.** The Ingress per-IP limit (20 r/s, burst 80, `429`) above the app's own (10 r/s, burst 40) and the edge cache bound the origin load; the free plan's single rule stays with the token service. No change to make.
-- [ ] external review — maintainer item
+- [ ] external review (ADR-0009 gate G4: not a launch gate; covered by redeploy and the audit pass) — maintainer item
 - [x] chain-identity check on `GRPC_URL` — F8, F16 (0.0.6)
 - [x] image scan gate, scan of the published image before signing, image and manifest scans clean at the
   review date — F10, F17 (CI gate passed for 0.0.9; not re-run locally)
