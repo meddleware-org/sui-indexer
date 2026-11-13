@@ -126,6 +126,36 @@ A read-indexer for display data. See [README.md](README.md) for the API and conf
     `sui-rpc` (Mysten's SDK) for gRPC, `serde_json`. No ORM, no async runtime beyond tokio.
   - Distroless `cc` runtime, nonroot, no shell. Release profile: overflow checks on, `panic = "abort"`.
 
+## Layout and commands
+
+```text
+crates/store     PostgreSQL: the ONLY crate with SQL. db.rs (DATABASE_URL, verify-full TLS), migrate.rs + migrations/ (versioned
+                 schema), writer.rs (Store: the owner connection holding the writer lock), reader.rs (the API's SELECT-only pool;
+                 one statement per request), read.rs (shared queries, page_sql/events_sql), testdb.rs (per-test databases, feature
+                 testing), config.rs (env -> config, recorded package deployments), sui.rs, time.rs
+crates/ingest    the writer: source.rs (sui-rpc ListEvents/GetServiceInfo, page assembly from frames), decode.rs (kind from the
+                 type, gate/commission from the node's JSON; no BCS decoding), ingestor.rs (poll loop, gaps, heartbeats), chain.rs
+                 (chain ids), lib.rs (startup order, loop, --healthcheck), main.rs
+crates/api       the read API: handler.rs (routing, validation, cache headers), query.rs (URL parsing and canonical forms),
+                 ratelimit.rs (per-IP buckets), server.rs (hyper, timeouts, shutdown), main.rs
+crates/testkit   test fixtures (BCS written independently of the client parsers), `seed-fixture` (provision + seed a throwaway
+                 database for the contract job)
+tests/contract   CI only: the published client packages against the built `api` binary
+scripts/         smoke.sh (image + PostgreSQL), test-postgres.sh (pinned TLS PostgreSQL for tests), check-sbom.sh and check-index.sh
+                 (+ tests/) for the release gates
+```
+
+| Task | Command |
+| --- | --- |
+| Format / lint | `cargo fmt --check` / `cargo clippy --workspace --all-targets --locked -- -D warnings` |
+| Tests | `bash scripts/test-postgres.sh start && . "${TMPDIR:-/tmp}/sui-indexer-test-pg/env.sh"` then `cargo test --workspace --locked` |
+| Coverage | `cargo llvm-cov --workspace --locked --summary-only` |
+| Supply chain | `cargo deny check`; `bash scripts/tests/check-sbom-test.sh` |
+| Build | `cargo build --release --locked` (-> `target/release/{ingest,api}`) |
+| Run locally | `DATABASE_URL=... ./target/release/ingest` (owner role) and `DATABASE_URL=... ./target/release/api` (SELECT-only role); `ALLOW_INSECURE_DATABASE=1` only for a plaintext local database |
+| Client contract | `cargo build --release -p sui-indexer-api -p sui-indexer-testkit && (cd tests/contract && npm ci && TEST_DATABASE_URL=... npm test)` |
+| Image | `podman build -t sui-indexer .` then `DOCKER=podman bash scripts/smoke.sh sui-indexer` (starts its own PostgreSQL) |
+
 ## Tests
 
 `cargo test --workspace --locked` needs a PostgreSQL 18: `TEST_DATABASE_URL` (a superuser URL; `scripts/test-postgres.sh`
@@ -156,6 +186,8 @@ a second ingester refused, database outage and recovery).
 Before a release, run both binaries locally against testnet (README → Development).
 
 ## Release
+
+Bump `version` in `[workspace.package]` of `Cargo.toml` (and `Cargo.lock`), add a CHANGELOG entry, push, tag `v<version>`; the workflow checks tag == version.
 
 `docker-publish.yml` (tag `v*`): `version` and `verify` (the full `rust-ci.yml`), then per architecture a native
 build (amd64 on `ubuntu-latest`, arm64 on `ubuntu-24.04-arm`, never QEMU) to an OCI archive with no registry
