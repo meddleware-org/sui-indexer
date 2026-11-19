@@ -3,8 +3,11 @@
 //!
 //! - The streams are polled independently: one failing never stops the other.
 //! - An event that cannot be stored is counted and skipped (the page advances past it).
-//! - A cursor that fell below the node's retention restarts from the node's earliest data instead
-//!   of retrying forever (a counted gap).
+//! - A cursor the node refuses is never retried forever. Whatever the node's wording ("pruned",
+//!   "below earliest available", "invalid cursor"), the decision is made on numbers: if the last
+//!   checkpoint stored is still served (`lowest_available_checkpoint`), the stream resumes from it
+//!   (no gap: the cursor format changed, 2026-11-10); if it is older than the node's retention, the
+//!   events in between are gone and the stream restarts from the node's earliest data (a counted gap).
 //! - After each stream poll the heartbeat `heartbeats poll:<stream>` is written for the API's `/healthz`,
 //!   and `heartbeats ingest:alive` is refreshed around every request for the exec liveness probe.
 
@@ -34,6 +37,12 @@ impl IngestOptions {
     pub fn new(packages: Packages) -> IngestOptions {
         IngestOptions { packages, max_pages_per_poll: 20, request_timeout: Duration::from_secs(30) }
     }
+}
+
+/// The node refused the stored cursor: pruned history, or a cursor it can no longer decode
+/// (`InvalidArgument` on `options.after`, "invalid cursor").
+pub fn is_refused_cursor(message: &str) -> bool {
+    is_pruned(message) || message.to_ascii_lowercase().contains("invalid cursor")
 }
 
 /// What the full node says when a cursor falls below the data it still serves (history pruned).
@@ -100,8 +109,22 @@ impl<S: EventSource> Ingestor<S> {
         let event_type = stream_filter(stream, &self.opts.packages);
         let mut added = 0;
         let mut cursor = self.store.cursor(stream).await.map_err(|e| e.to_string())?;
+        // Without a cursor, continue from the last checkpoint stored if the node still serves it (else
+        // from its earliest data). A first run has stored nothing and starts at the earliest data.
+        let mut start_checkpoint = None;
+        if cursor.is_none()
+            && let Some(last) = self.store.last_checkpoint(stream).await.map_err(|e| e.to_string())?
+        {
+            let lowest = self.lowest_available().await?;
+            start_checkpoint = (last >= lowest).then_some(last);
+        }
         for _ in 0..self.opts.max_pages_per_poll {
-            let req = ListRequest { event_type: event_type.clone(), after: cursor.clone(), limit: PAGE_SIZE };
+            let req = ListRequest {
+                event_type: event_type.clone(),
+                after: cursor.clone(),
+                start_checkpoint: if cursor.is_none() { start_checkpoint } else { None },
+                limit: PAGE_SIZE,
+            };
             let res = tokio::time::timeout(self.opts.request_timeout, self.source.list_events(req)).await;
             self.alive().await;
             let res = res.map_err(|_| {
@@ -144,24 +167,49 @@ impl<S: EventSource> Ingestor<S> {
         Ok(added)
     }
 
-    /// Poll one stream, recovering from a pruned cursor, and record its health.
+    /// The node's lowest served checkpoint, within the request timeout.
+    async fn lowest_available(&self) -> Result<u64, String> {
+        tokio::time::timeout(self.opts.request_timeout, self.source.lowest_available_checkpoint()).await.map_err(
+            |_| format!("the full node request timed out after {} ms", self.opts.request_timeout.as_millis()),
+        )?
+    }
+
+    /// The node refused the stored cursor: resume from the last stored checkpoint if the node still
+    /// serves it (no gap), else record a gap and restart from the node's earliest data.
+    async fn recover_refused_cursor(&mut self, stream: Stream, message: &str) -> Result<usize, String> {
+        let last = self.store.last_checkpoint(stream).await.map_err(|e| e.to_string())?;
+        let lowest = self.lowest_available().await.map_err(|e| format!("{message}; and {e}"))?;
+        match last {
+            Some(cp) if cp >= lowest => {
+                (self.log)(&format!(
+                    "{stream}: the node refused the stored cursor ({message}); resuming from checkpoint {cp}, which it \
+                     still serves (lowest {lowest}): no gap"
+                ));
+                self.store.drop_cursor_to_resume(stream, message, &iso(now_ms())).await.map_err(|e| e.to_string())?;
+            }
+            _ => {
+                // The events between the last stored checkpoint and the node's retention are gone for good.
+                (self.log)(&format!(
+                    "{stream}: cursor is below the node's retention ({message}; lowest {lowest}); restarting from its \
+                     earliest data"
+                ));
+                self.store.reset_cursor_after_gap(stream, message, &iso(now_ms())).await.map_err(|e| e.to_string())?;
+            }
+        }
+        self.poll_stream(stream).await
+    }
+
+    /// Poll one stream, recovering from a refused cursor, and record its health.
     pub async fn poll_one(&mut self, stream: Stream) {
         self.alive().await;
         let outcome = match self.poll_stream(stream).await {
             Ok(n) => Ok(n),
             Err(message) => {
                 let has_cursor = matches!(self.store.cursor(stream).await, Ok(Some(_)));
-                if !is_pruned(&message) || !has_cursor {
+                if !is_refused_cursor(&message) || !has_cursor {
                     Err(message)
                 } else {
-                    // The events between the stored cursor and the node's retention are gone for good.
-                    (self.log)(&format!(
-                        "{stream}: cursor is below the node's retention ({message}); restarting from its earliest data"
-                    ));
-                    match self.store.reset_cursor_after_gap(stream, &message, &iso(now_ms())).await {
-                        Ok(()) => self.poll_stream(stream).await,
-                        Err(e) => Err(e.to_string()),
-                    }
+                    self.recover_refused_cursor(stream, &message).await
                 }
             }
         };

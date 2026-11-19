@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.21] - 2026-11-19
+
+### Fixed
+
+- A stored cursor the full node refuses no longer stops a stream for good. The node's wording varies ("below earliest
+  available", "has been pruned", and since a node upgrade around 2026-11-10 "invalid cursor" for a cursor in the old
+  format), so the ingester now decides on numbers: it asks the node for its lowest served checkpoint and resumes from the
+  last checkpoint it stored if that is still served (no gap; `meta resume:<stream>`), or restarts from the node's earliest
+  data and counts a gap if it is not. Resuming by checkpoint (`ListEventsRequest.start_checkpoint`) does not depend on the
+  cursor format. The access-gate stream had retried an "invalid cursor" from 2026-11-10 to 2026-11-19; no event was lost
+  (checked against Sui's GraphQL RPC: the only event in the range was already indexed).
+
+### Added
+
+- `GET /metrics` on its own port (`METRICS_PORT`, default 9184; not on the public port): per stream the time of the last
+  successful poll and whether it is fresh by the `/healthz` rule, and whether the database answered, so a stalled stream
+  raises an alert instead of going unnoticed.
+
 ## [0.0.20] - 2026-11-06
 
 ### Changed

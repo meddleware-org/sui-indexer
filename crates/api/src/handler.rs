@@ -378,6 +378,50 @@ struct ReadyBody<'a> {
     error: Option<&'a str>,
 }
 
+/// Prometheus text for the monitoring stack (served on `METRICS_PORT` only, never on the public port):
+/// per stream, the time of the last successful poll and whether it is fresh by the same rule as
+/// `/healthz`; and whether the database answered. An alert on a stale stream (the access-gate stream
+/// failed unnoticed from 2026-11-10 to 2026-11-19) reads these.
+pub async fn metrics(ctx: &ApiContext) -> ApiResponse {
+    let now = (ctx.now)();
+    let limit = i64::try_from(ctx.poll_ms.saturating_mul(5)).unwrap_or(i64::MAX);
+    let mut out = String::from(
+        "# HELP sui_indexer_stream_last_success_timestamp_seconds Unix time of the stream's last successful poll (0: never).\n\
+         # TYPE sui_indexer_stream_last_success_timestamp_seconds gauge\n",
+    );
+    let mut up = String::from(
+        "# HELP sui_indexer_stream_up 1 when the stream's last successful poll is within five poll intervals (as /healthz).\n\
+         # TYPE sui_indexer_stream_up gauge\n",
+    );
+    let db_up = match ctx.db.reader().polls().await {
+        Ok(states) => {
+            for (stream, h) in Stream::ALL.iter().zip(states) {
+                let labels = format!("network=\"{}\",stream=\"{}\"", ctx.network, stream.as_str());
+                let secs = h.last_success_at as f64 / 1000.0;
+                let fresh = h.last_success_at != 0 && now - h.last_success_at < limit;
+                out.push_str(&format!("sui_indexer_stream_last_success_timestamp_seconds{{{labels}}} {secs}\n"));
+                up.push_str(&format!("sui_indexer_stream_up{{{labels}}} {}\n", u8::from(fresh)));
+            }
+            1
+        }
+        Err(_) => 0,
+    };
+    out.push_str(&up);
+    out.push_str(&format!(
+        "# HELP sui_indexer_database_up 1 when the API could read the ingester's heartbeats.\n\
+         # TYPE sui_indexer_database_up gauge\nsui_indexer_database_up{{network=\"{}\"}} {db_up}\n",
+        ctx.network
+    ));
+    ApiResponse {
+        status: 200,
+        body: out,
+        headers: vec![
+            ("Content-Type", "text/plain; version=0.0.4; charset=utf-8".into()),
+            ("Cache-Control", "no-store".into()),
+        ],
+    }
+}
+
 async fn healthz(ctx: &ApiContext) -> ApiResponse {
     let now = (ctx.now)();
     let limit = i64::try_from(ctx.poll_ms.saturating_mul(5)).unwrap_or(i64::MAX);

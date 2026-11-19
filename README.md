@@ -84,6 +84,7 @@ All routes are `GET` (and `HEAD`), and responses are JSON with `Access-Control-A
 | `ACCESS_GATE_ORIGINAL_ID` / `SEAL_ORIGINAL_ID` | ingest | the deployments recorded in the client packages (`crates/store/src/config.rs`) |
 | `REINDEX_CONFIRM` | ingest | unset: a package change stops startup (see Package changes) |
 | `PORT` | api | `8080` |
+| `METRICS_PORT` | api | `9184`; `GET /metrics` only (Prometheus text: `sui_indexer_stream_last_success_timestamp_seconds`, `sui_indexer_stream_up` by the `/healthz` rule, `sui_indexer_database_up`); keep it out of the Service and the Ingress; `0` turns it off |
 | `RATE_LIMIT_PER_SEC` / `RATE_LIMIT_BURST` | api | `10` / `40` per client IP (IPv6 clients by /64; at most 50 000 buckets are kept) |
 
 - **First start.** The ingester backfills from the oldest event the full node still serves.
@@ -103,9 +104,15 @@ All routes are `GET` (and `HEAD`), and responses are JSON with `Access-Control-A
 - **Independent streams.** One stream failing never stops the other; each reports its own health.
 - **Undecodable events** — a recognised event without what its row needs (no JSON rendering or field, no
   BCS, no position) — are counted, logged and skipped (the page advances past them).
-- **Pruned cursor.** If the stored cursor falls below what the full node still serves (no event arrived
-  to move it before the node pruned), the stream restarts from the node's earliest data and counts a
-  `gap`; the events in between are gone for good.
+- **Refused cursor (pruned history, or a cursor format the node no longer accepts).** The node's wording
+  varies ("below earliest available", "has been pruned", "invalid cursor"), so the decision is made on
+  numbers: the ingester asks the node for its lowest served checkpoint (`GetServiceInfo`) and compares it
+  with the last checkpoint it stored. If that checkpoint is still served, the stream **resumes from it**
+  (no gap: re-reading it is harmless, duplicates are ignored); the reason goes to `meta resume:<stream>`.
+  If it is older than the node keeps, the stream restarts from the node's earliest data and counts a
+  `gap` (`meta gap:<stream>`); the events in between are gone from this node. If the node cannot say what
+  it serves, the cursor is kept and the poll fails with both errors. (2026-11-10: a node upgrade changed
+  the cursor format; the access-gate stream retried an "invalid cursor" until 2026-11-19.)
 - **Counters.** Coverage, gate stats and commission are maintained at ingest, so serving a page never
   reads a whole stream for them.
 - **Indexes.** `events_stream (stream, id)` serves unfiltered pages, `events_gate (stream, gate_id, id)` serves

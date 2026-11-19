@@ -56,11 +56,16 @@ pub struct SourcePage {
 }
 
 /// An ascending listing request: events whose type matches `event_type` (`pkg::module` or a full
-/// type), strictly after `after`.
+/// type), strictly after `after`; without a cursor, from `start_checkpoint` (inclusive) when given,
+/// else from the node's earliest data.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ListRequest {
     pub event_type: String,
     pub after: Option<String>,
+    /// Where to start when there is no cursor: a checkpoint the node still serves. Positions are
+    /// stable across node upgrades, unlike the opaque cursor bytes (whose format changed once and made
+    /// every stored cursor "invalid", 2026-11-10). Ignored when `after` is set.
+    pub start_checkpoint: Option<u64>,
     pub limit: u32,
 }
 
@@ -70,6 +75,9 @@ pub trait EventSource {
     fn list_events(&self, req: ListRequest) -> impl Future<Output = Result<SourcePage, String>>;
     /// The node's chain identifier: the base58 digest of the genesis checkpoint.
     fn chain_identifier(&self) -> impl Future<Output = Result<String, String>>;
+    /// The lowest checkpoint the node still serves (everything older was pruned). The poll loop
+    /// compares it with the last checkpoint it indexed, so recovery never depends on error wording.
+    fn lowest_available_checkpoint(&self) -> impl Future<Output = Result<u64, String>>;
 }
 
 /// One stream frame, reduced to what the page logic reads.
@@ -194,8 +202,10 @@ pub fn grpc_request(req: &ListRequest) -> Result<ListEventsRequest, String> {
     let mut options = QueryOptions::default();
     options.limit = Some(req.limit + 1);
     options.ordering = Some(Ordering::Ascending as i32);
+    let resume_at = if after.is_none() { req.start_checkpoint } else { None };
     options.after = after;
     let mut r = ListEventsRequest::default();
+    r.start_checkpoint = resume_at;
     r.read_mask = Some(prost_types::FieldMask { paths: READ_MASK.iter().map(|p| (*p).to_owned()).collect() });
     r.filter = Some(filter);
     r.options = Some(options);
@@ -246,5 +256,13 @@ impl EventSource for GrpcSource {
         let mut ledger = self.client.clone().ledger_client();
         let info = ledger.get_service_info(GetServiceInfoRequest::default()).await.map_err(|s| status_message(&s))?;
         info.into_inner().chain_id.ok_or_else(|| "the node reported no chain identifier".to_owned())
+    }
+
+    async fn lowest_available_checkpoint(&self) -> Result<u64, String> {
+        let mut ledger = self.client.clone().ledger_client();
+        let info = ledger.get_service_info(GetServiceInfoRequest::default()).await.map_err(|s| status_message(&s))?;
+        info.into_inner()
+            .lowest_available_checkpoint
+            .ok_or_else(|| "the node reported no lowest available checkpoint".to_owned())
     }
 }

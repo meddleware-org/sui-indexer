@@ -19,7 +19,7 @@ use hyper_util::rt::{TokioIo, TokioTimer};
 use hyper_util::server::graceful::GracefulShutdown;
 use tokio::net::TcpListener;
 
-use crate::handler::{ApiContext, ApiRequest, ApiResponse, handle, internal_error};
+use crate::handler::{ApiContext, ApiRequest, ApiResponse, handle, internal_error, metrics};
 use crate::log;
 
 pub const HEADER_TIMEOUT: Duration = Duration::from_secs(5);
@@ -79,8 +79,34 @@ pub async fn bind(port: u16) -> std::io::Result<TcpListener> {
     }
 }
 
-/// Serve until `shutdown` resolves, then stop accepting and give in-flight requests the grace period.
+/// The metrics listener's one route: `GET /metrics`; anything else is 404.
+pub async fn respond_metrics(ctx: &ApiContext, req: &Request<Incoming>) -> Response<Full<Bytes>> {
+    if req.method() == hyper::Method::GET && req.uri().path() == "/metrics" {
+        to_hyper(metrics(ctx).await)
+    } else {
+        let mut r = Response::new(Full::new(Bytes::new()));
+        *r.status_mut() = StatusCode::NOT_FOUND;
+        r
+    }
+}
+
+/// Serve the public API until `shutdown` resolves, then stop accepting and give in-flight requests
+/// the grace period.
 pub async fn serve(listener: TcpListener, ctx: Arc<ApiContext>, shutdown: impl Future<Output = ()>) {
+    serve_inner(listener, ctx, shutdown, false).await;
+}
+
+/// Serve `/metrics` alone on its own listener (`METRICS_PORT`), with the same limits and shutdown.
+pub async fn serve_metrics(listener: TcpListener, ctx: Arc<ApiContext>, shutdown: impl Future<Output = ()>) {
+    serve_inner(listener, ctx, shutdown, true).await;
+}
+
+async fn serve_inner(
+    listener: TcpListener,
+    ctx: Arc<ApiContext>,
+    shutdown: impl Future<Output = ()>,
+    metrics_only: bool,
+) {
     let graceful = GracefulShutdown::new();
     let mut builder = http1::Builder::new();
     builder.timer(TokioTimer::new()).header_read_timeout(HEADER_TIMEOUT).max_buf_size(MAX_BUF);
@@ -106,7 +132,11 @@ pub async fn serve(listener: TcpListener, ctx: Arc<ApiContext>, shutdown: impl F
         let service = service_fn(move |req: Request<Incoming>| {
             let ctx = ctx.clone();
             async move {
-                let res = tokio::time::timeout(REQUEST_TIMEOUT, respond(&ctx, &req, &peer)).await;
+                let res = if metrics_only {
+                    tokio::time::timeout(REQUEST_TIMEOUT, respond_metrics(&ctx, &req)).await
+                } else {
+                    tokio::time::timeout(REQUEST_TIMEOUT, respond(&ctx, &req, &peer)).await
+                };
                 Ok::<_, Infallible>(res.unwrap_or_else(|_| {
                     let mut r = Response::new(Full::new(Bytes::new()));
                     *r.status_mut() = StatusCode::REQUEST_TIMEOUT;

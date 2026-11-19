@@ -307,6 +307,56 @@ async fn reports_coverage_per_stream() {
 }
 
 #[tokio::test]
+async fn metrics_report_each_streams_last_success_and_freshness_by_the_healthz_rule() {
+    let s = setup!();
+    s.store
+        .record_poll(
+            Stream::AccessGate,
+            &PollState {
+                last_success_at: now_ms() - 5 * 15_000 - 1,
+                last_error: Some("invalid cursor".into()),
+                last_attempt_at: now_ms(),
+            },
+        )
+        .await
+        .unwrap();
+    let res = crate::handler::metrics(&s.ctx).await;
+    assert_eq!(res.status, 200);
+    assert!(res.headers.iter().any(|(k, v)| *k == "Content-Type" && v.starts_with("text/plain; version=0.0.4")));
+    let body = &res.body;
+    let line = |prefix: &str| body.lines().find(|l| l.starts_with(prefix)).map(str::to_owned);
+    assert_eq!(
+        line("sui_indexer_stream_up{network=\"testnet\",stream=\"access-gate\"}").unwrap().rsplit(' ').next(),
+        Some("0")
+    );
+    assert_eq!(
+        line("sui_indexer_stream_up{network=\"testnet\",stream=\"sealed-content\"}").unwrap().rsplit(' ').next(),
+        Some("1")
+    );
+    let ts: f64 = line("sui_indexer_stream_last_success_timestamp_seconds{network=\"testnet\",stream=\"access-gate\"}")
+        .unwrap()
+        .rsplit(' ')
+        .next()
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!(ts > 1.7e9, "seconds, not milliseconds: {ts}");
+    assert!(body.contains("sui_indexer_database_up{network=\"testnet\"} 1"));
+    // Every sample has a TYPE line (Prometheus text format).
+    for name in
+        ["sui_indexer_stream_last_success_timestamp_seconds", "sui_indexer_stream_up", "sui_indexer_database_up"]
+    {
+        assert!(body.contains(&format!("# TYPE {name} gauge")), "{name}");
+    }
+}
+
+#[tokio::test]
+async fn metrics_are_not_on_the_public_api() {
+    let s = setup!();
+    assert_eq!(s.get("/metrics").await.status, 404);
+}
+
+#[tokio::test]
 async fn healthz_is_503_before_the_first_poll_and_after_polls_stall_and_names_the_stream_and_its_error() {
     let s = setup!();
     assert_eq!(s.get("/healthz").await.status, 200);

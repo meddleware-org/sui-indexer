@@ -52,7 +52,31 @@ fn main() -> ExitCode {
                 Err(e) => format!("; {}: answering 503 until the ingester has migrated and started", e.message),
             }
         ));
-        server::serve(listener, ctx, shutdown_signal()).await;
+        // `/metrics` on its own port (never in the Service or the Ingress), stopped with the API.
+        let (stop_tx, stop_rx) = tokio::sync::watch::channel(());
+        if cfg.metrics_port != 0 {
+            match server::bind(cfg.metrics_port).await {
+                Ok(metrics_listener) => {
+                    let (ctx, mut stop) = (ctx.clone(), stop_rx.clone());
+                    log(&format!("metrics on :{}/metrics", cfg.metrics_port));
+                    tokio::spawn(async move {
+                        server::serve_metrics(metrics_listener, ctx, async move {
+                            let _ = stop.changed().await;
+                        })
+                        .await;
+                    });
+                }
+                Err(e) => log(&format!(
+                    "cannot listen on :{} for metrics: {e} (serving the API without them)",
+                    cfg.metrics_port
+                )),
+            }
+        }
+        server::serve(listener, ctx, async move {
+            shutdown_signal().await;
+            let _ = stop_tx.send(());
+        })
+        .await;
         log("stopped");
         ExitCode::SUCCESS
     })

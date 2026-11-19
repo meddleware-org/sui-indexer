@@ -346,6 +346,27 @@ impl Store {
         Ok(())
     }
 
+    /// The highest checkpoint of an event stored for `stream`, if any: where a refused cursor is
+    /// resumed from (re-reading that checkpoint is harmless, inserting an event twice is a no-op).
+    pub async fn last_checkpoint(&self, stream: Stream) -> Result<Option<u64>> {
+        let row =
+            self.client.query_one("SELECT max(checkpoint) FROM events WHERE stream = $1", &[&stream.as_str()]).await?;
+        Ok(row.get::<_, Option<i64>>(0).and_then(|c| u64::try_from(c).ok()))
+    }
+
+    /// The node refused the stored cursor although the data after it is still served (its cursor
+    /// format changed): forget the cursor so the next poll resumes from the last stored checkpoint.
+    /// Not a gap, so it is not counted as one; `at_iso` and the reason go to `meta resume:<stream>`.
+    pub async fn drop_cursor_to_resume(&mut self, stream: Stream, reason: &str, at_iso: &str) -> Result<()> {
+        let reason: String = truncate_utf16(reason, 200);
+        let value = serde_json::json!({ "at": at_iso, "reason": reason }).to_string();
+        let tx = self.client.transaction().await?;
+        tx.execute("DELETE FROM cursors WHERE stream = $1", &[&stream.as_str()]).await?;
+        tx.execute(&self.stmts.upsert_meta, &[&format!("resume:{stream}"), &value]).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
     /// The stored cursor points below what the full node still serves (its history was pruned while
     /// no event arrived to move the cursor). The events in between are gone for good, so restart from
     /// the node's earliest data: rows already stored are untouched (re-inserting is a no-op). Counted

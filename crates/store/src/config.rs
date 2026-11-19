@@ -3,7 +3,7 @@
 //!
 //! - the ingester: `NETWORK`, `GRPC_URL`, `DATABASE_URL`, `POLL_MS`, `ACCESS_GATE_ORIGINAL_ID`,
 //!   `SEAL_ORIGINAL_ID`, `REINDEX_CONFIRM`;
-//! - the API: `NETWORK`, `DATABASE_URL`, `DB_POOL_SIZE`, `PORT`, `POLL_MS`, `RATE_LIMIT_PER_SEC`,
+//! - the API: `NETWORK`, `DATABASE_URL`, `DB_POOL_SIZE`, `PORT`, `METRICS_PORT`, `POLL_MS`, `RATE_LIMIT_PER_SEC`,
 //!   `RATE_LIMIT_BURST`;
 //! - both: `ALLOW_INSECURE_DATABASE=1` (local tests: admits `sslmode=disable` and an empty password).
 //!
@@ -59,6 +59,8 @@ pub struct ApiConfig {
     /// Connections in the API's pool.
     pub pool_size: usize,
     pub port: u16,
+    /// Where `/metrics` is served, apart from the public API (never in the Service or the Ingress); 0 = off.
+    pub metrics_port: u16,
     /// The ingester's poll interval: `/healthz` calls a stream stale after five of them.
     pub poll_ms: u64,
     /// Requests per second per client IP (token refill rate).
@@ -240,6 +242,7 @@ impl ApiConfig {
             database: database(env)?,
             pool_size: int(env, "DB_POOL_SIZE", 8, 1, 64)? as usize,
             port: int(env, "PORT", 8080, 1, 65_535)? as u16,
+            metrics_port: int(env, "METRICS_PORT", 9184, 0, 65_535)? as u16,
             poll_ms: int(env, "POLL_MS", 15_000, 1_000, 3_600_000)?,
             rate_limit_per_sec: int(env, "RATE_LIMIT_PER_SEC", 10, 1, 10_000)? as u32,
             rate_limit_burst: int(env, "RATE_LIMIT_BURST", 40, 1, 100_000)? as u32,

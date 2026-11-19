@@ -89,8 +89,9 @@ A read-indexer for display data. See [README.md](README.md) for the API and conf
   upgrade's id, so this indexer would not see it (and would not log it: the node never returns it).
   Adding one means a fresh publish and a `REINDEX_CONFIRM` rebind, not an upgrade.
 - **Never stall on one bad input.** Streams are polled independently; an undecodable event is counted
-  and skipped; a cursor below the node's retention restarts from its earliest data (a counted gap).
-  `/healthz` reports each stream.
+  and skipped; a refused cursor (any wording) is decided on numbers: resume from the last stored checkpoint if the node
+  still serves it (`lowest_available_checkpoint`; no gap), else restart from its earliest data (a counted gap).
+  `/healthz` reports each stream; `/metrics` on `METRICS_PORT` (never public) exports the same freshness for alerts.
 - **Counters, not scans.** `stream_stats`, `gate_stats` and `gate_commission` are updated in the ingest
   transaction. There is no backfill (the schema is created with them and every row enters through `ingest`;
   `Store::verify_counters` recounts). No request path may scan a

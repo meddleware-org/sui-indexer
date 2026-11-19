@@ -53,11 +53,17 @@ struct Fake {
     calls: RefCell<Vec<ListRequest>>,
     chain: Result<String, String>,
     hang: bool,
+    /// The node's lowest served checkpoint (`GetServiceInfo`); 0 = it serves everything.
+    lowest: Result<u64, String>,
 }
 
 impl Fake {
     fn new(handler: Handler) -> Fake {
-        Fake { handler, calls: RefCell::new(vec![]), chain: Ok(TESTNET_GENESIS.into()), hang: false }
+        Fake { handler, calls: RefCell::new(vec![]), chain: Ok(TESTNET_GENESIS.into()), hang: false, lowest: Ok(0) }
+    }
+    fn with_lowest(mut self, lowest: u64) -> Fake {
+        self.lowest = Ok(lowest);
+        self
     }
 }
 
@@ -71,6 +77,9 @@ impl EventSource for Fake {
     }
     async fn chain_identifier(&self) -> Result<String, String> {
         self.chain.clone()
+    }
+    async fn lowest_available_checkpoint(&self) -> Result<u64, String> {
+        self.lowest.clone()
     }
 }
 
@@ -363,7 +372,8 @@ async fn restarts_from_the_nodes_earliest_data_when_the_cursor_fell_below_its_re
             return Ok(SourcePage::default());
         }
         Ok(SourcePage { events: vec![fresh.clone()], has_next_page: false, end_cursor: Some("fresh".into()) })
-    }));
+    }))
+    .with_lowest(40); // the only stored event is at checkpoint 1: below the node's retention
     let (mut ing, logs) = ingestor(&db, fake).await;
     ing.store_mut()
         .ingest(Stream::AccessGate, &[minted(&gate_a(), 1, 1).indexed()], Some("stale-cursor"))
@@ -379,6 +389,114 @@ async fn restarts_from_the_nodes_earliest_data_when_the_cursor_fell_below_its_re
     assert_eq!(ing.health(Stream::AccessGate).last_error, None);
     assert!(logs.borrow().iter().any(|l| l.contains("below the node's retention")));
     assert!(ing.source().calls.borrow().len() > 1);
+}
+
+#[tokio::test]
+async fn a_cursor_the_node_no_longer_decodes_resumes_from_the_last_stored_checkpoint_without_a_gap() {
+    // 2026-11-10: the node changed its cursor format, so the stored cursor became "invalid cursor"
+    // (InvalidArgument on options.after) while the data after it was still served.
+    let db = require_db!();
+    let ag = ag_filter();
+    let next = raw(&minted(&gate_a(), 60, 1));
+    let fake = Fake::new(Box::new(move |req| {
+        if req.after.as_deref() == Some("old-format") {
+            return Err("invalid cursor".into());
+        }
+        if req.event_type != ag {
+            return Ok(SourcePage::default());
+        }
+        // Resumed by position: from the last stored checkpoint, never from the beginning.
+        assert_eq!(req.start_checkpoint, Some(50));
+        Ok(SourcePage { events: vec![next.clone()], has_next_page: false, end_cursor: Some("new-format".into()) })
+    }))
+    .with_lowest(40);
+    let (mut ing, logs) = ingestor(&db, fake).await;
+    ing.store_mut()
+        .ingest(Stream::AccessGate, &[minted(&gate_a(), 50, 1).indexed()], Some("old-format"))
+        .await
+        .unwrap();
+    ing.poll().await;
+    let s = ing.store();
+    assert_eq!(s.cursor(Stream::AccessGate).await.unwrap().as_deref(), Some("new-format"));
+    assert_eq!(s.health(Stream::AccessGate).await.unwrap().gaps, 0, "nothing was lost, so no gap is counted");
+    assert!(s.meta("resume:access-gate").await.unwrap().unwrap().contains("invalid cursor"));
+    assert_eq!(s.coverage(Stream::AccessGate).await.unwrap().events, 2);
+    assert_eq!(ing.health(Stream::AccessGate).last_error, None);
+    assert!(logs.borrow().iter().any(|l| l.contains("resuming from checkpoint 50")));
+}
+
+#[tokio::test]
+async fn an_invalid_cursor_whose_data_was_also_pruned_is_a_counted_gap() {
+    let db = require_db!();
+    let ag = ag_filter();
+    let fresh = raw(&minted(&gate_a(), 500, 1));
+    let fake = Fake::new(Box::new(move |req| {
+        if req.after.as_deref() == Some("old-format") {
+            return Err("invalid cursor".into());
+        }
+        if req.event_type != ag || req.after.is_some() {
+            return Ok(SourcePage::default());
+        }
+        // Below the node's retention: start from its earliest data, not from the stored checkpoint.
+        assert_eq!(req.start_checkpoint, None);
+        Ok(SourcePage { events: vec![fresh.clone()], has_next_page: false, end_cursor: Some("fresh".into()) })
+    }))
+    .with_lowest(400);
+    let (mut ing, _) = ingestor(&db, fake).await;
+    ing.store_mut()
+        .ingest(Stream::AccessGate, &[minted(&gate_a(), 50, 1).indexed()], Some("old-format"))
+        .await
+        .unwrap();
+    ing.poll().await;
+    let s = ing.store();
+    assert_eq!(s.health(Stream::AccessGate).await.unwrap().gaps, 1);
+    assert_eq!(s.cursor(Stream::AccessGate).await.unwrap().as_deref(), Some("fresh"));
+    assert_eq!(ing.health(Stream::AccessGate).last_error, None);
+}
+
+#[tokio::test]
+async fn a_refused_cursor_is_not_reset_when_the_node_cannot_say_what_it_serves() {
+    // Without the lowest served checkpoint the ingester cannot tell a format change from a gap: it
+    // keeps the cursor and reports both errors rather than guessing.
+    let db = require_db!();
+    let mut fake =
+        Fake::new(Box::new(
+            |req| {
+                if req.after.is_some() { Err("invalid cursor".into()) } else { Ok(SourcePage::default()) }
+            },
+        ));
+    fake.lowest = Err("unavailable".into());
+    let (mut ing, _) = ingestor(&db, fake).await;
+    ing.store_mut().ingest(Stream::AccessGate, &[minted(&gate_a(), 50, 1).indexed()], Some("c")).await.unwrap();
+    ing.poll().await;
+    assert_eq!(ing.store().cursor(Stream::AccessGate).await.unwrap().as_deref(), Some("c"));
+    assert_eq!(ing.store().health(Stream::AccessGate).await.unwrap().gaps, 0);
+    let err = ing.health(Stream::AccessGate).last_error.clone().unwrap();
+    assert!(err.contains("invalid cursor") && err.contains("unavailable"), "{err}");
+}
+
+#[test]
+fn refused_cursor_wording() {
+    use crate::ingestor::is_refused_cursor;
+    for m in ["invalid cursor", "Invalid Cursor", "requested data below earliest available", "has been pruned"] {
+        assert!(is_refused_cursor(m), "{m}");
+    }
+    assert!(!is_refused_cursor("503 from fullnode"));
+}
+
+#[test]
+fn a_request_without_a_cursor_starts_at_the_given_checkpoint_and_a_cursor_wins_over_it() {
+    let r = grpc_request(&ListRequest { event_type: ag_filter(), after: None, start_checkpoint: Some(42), limit: 50 })
+        .unwrap();
+    assert_eq!(r.start_checkpoint, Some(42));
+    let r = grpc_request(&ListRequest {
+        event_type: ag_filter(),
+        after: Some("AQID".into()),
+        start_checkpoint: Some(42),
+        limit: 50,
+    })
+    .unwrap();
+    assert_eq!(r.start_checkpoint, None, "the cursor is the position; the checkpoint is ignored");
 }
 
 #[tokio::test]
@@ -524,7 +642,13 @@ proptest! {
 
 #[test]
 fn the_grpc_request_is_core_list_events_ascending_with_one_look_ahead_item() {
-    let r = grpc_request(&ListRequest { event_type: ag_filter(), after: Some("AQID".into()), limit: 50 }).unwrap();
+    let r = grpc_request(&ListRequest {
+        event_type: ag_filter(),
+        after: Some("AQID".into()),
+        start_checkpoint: None,
+        limit: 50,
+    })
+    .unwrap();
     let o = r.options.unwrap();
     assert_eq!(o.limit, Some(51));
     assert_eq!(o.ordering, Some(0));
@@ -540,9 +664,17 @@ fn the_grpc_request_is_core_list_events_ascending_with_one_look_ahead_item() {
         }
         p => panic!("unexpected predicate {p:?}"),
     }
-    assert!(grpc_request(&ListRequest { event_type: "x".into(), after: Some("!!".into()), limit: 50 }).is_err());
     assert!(
-        grpc_request(&ListRequest { event_type: "x".into(), after: None, limit: 50 })
+        grpc_request(&ListRequest {
+            event_type: "x".into(),
+            after: Some("!!".into()),
+            start_checkpoint: None,
+            limit: 50
+        })
+        .is_err()
+    );
+    assert!(
+        grpc_request(&ListRequest { event_type: "x".into(), after: None, start_checkpoint: None, limit: 50 })
             .unwrap()
             .options
             .unwrap()
@@ -689,7 +821,12 @@ async fn the_grpc_source_reads_list_events_frames_and_the_chain_identifier() {
     let source = GrpcSource::new(&url).unwrap();
     assert_eq!(source.chain_identifier().await.unwrap(), TESTNET_GENESIS);
     let page = source
-        .list_events(ListRequest { event_type: ag_filter(), after: Some("AQA=".into()), limit: 50 })
+        .list_events(ListRequest {
+            event_type: ag_filter(),
+            after: Some("AQA=".into()),
+            start_checkpoint: None,
+            limit: 50,
+        })
         .await
         .unwrap();
     assert_eq!(page.events, vec![raw(&a), raw(&b)]);
@@ -700,7 +837,12 @@ async fn the_grpc_source_reads_list_events_frames_and_the_chain_identifier() {
     assert_eq!((o.limit, o.ordering, o.after.as_deref()), (Some(51), Some(0), Some(&[1u8, 0][..])));
 
     let err = source
-        .list_events(ListRequest { event_type: ag_filter(), after: Some("7g==".into()), limit: 50 })
+        .list_events(ListRequest {
+            event_type: ag_filter(),
+            after: Some("7g==".into()),
+            start_checkpoint: None,
+            limit: 50,
+        })
         .await
         .unwrap_err();
     assert!(is_pruned(&err), "{err}");
@@ -718,7 +860,12 @@ async fn an_unreachable_node_is_an_error_not_a_hang() {
     let err = source.chain_identifier().await.unwrap_err();
     // The cause is named, not only "tcp connect error".
     assert!(err.to_lowercase().contains("refused"), "{err}");
-    assert!(source.list_events(ListRequest { event_type: ag_filter(), after: None, limit: 50 }).await.is_err());
+    assert!(
+        source
+            .list_events(ListRequest { event_type: ag_filter(), after: None, start_checkpoint: None, limit: 50 })
+            .await
+            .is_err()
+    );
 }
 
 // ── Startup wiring (main) ──────────────────────────────────────────────────
