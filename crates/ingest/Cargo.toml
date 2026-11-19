@@ -21,7 +21,7 @@ sui-indexer-store = { path = "../store" }
 # GetServiceInfo. Pinned exactly: 0.x releases change the generated API.
 sui-rpc = { version = "=0.4.0", default-features = false }
 tonic = { version = "=0.14.9", default-features = false }
-prost-types = "=0.14.4"
+prost-types = "=0.14.6"
 tokio = { version = "=1.54.1", features = ["rt", "macros", "time", "signal"] }
 base64 = "=0.23.1"
 bs58 = { version = "=0.5.1", default-features = false, features = ["alloc"] }
