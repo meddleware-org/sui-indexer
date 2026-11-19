@@ -23,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   successful poll and whether it is fresh by the `/healthz` rule, and whether the database answered, so a stalled stream
   raises an alert instead of going unnoticed.
 
+### Security
+
+- Runtime base `gcr.io/distroless/cc-debian13:nonroot` refreshed to the digest carrying `zlib1g 1:1.3.dfsg+really1.3.1-1+deb13u1`
+  (CVE-2026-85091, HIGH: heap buffer overflow in `gz_vacate()`), found by the image scan.
+
 ## [0.0.20] - 2026-11-06
 
 ### Changed
