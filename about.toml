@@ -1,6 +1,7 @@
 # Licences accepted for crates linked into the `api` and `ingest` binaries. A dependency under any other
 # licence fails the image build and CI (`cargo about generate --fail`): review it, then add it here
 # deliberately (and to deny.toml).
+# The accepted licence identifiers (SPDX), all permissive.
 accepted = [
     "0BSD",
     "Apache-2.0",
@@ -12,7 +13,10 @@ accepted = [
     "Unlicense",
     "Zlib",
 ]
+# The platforms the shipped images are built for: only crates linked on these are listed.
 targets = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]
+# Build and test tooling is not redistributed in the image, so it is not listed.
 ignore-build-dependencies = true
 ignore-dev-dependencies = true
+# `ring` needs a known workaround to be detected as its real licence.
 workarounds = ["ring"]

@@ -16,8 +16,11 @@ use crate::sui::{is_hex_id, normalize_sui_address};
 /// One network's recorded package deployments (the original ids events are typed at).
 #[derive(Clone, Copy, Debug)]
 pub struct Deployment {
+    /// The network name (`testnet` or `mainnet`).
     pub network: &'static str,
+    /// The original id of the `access_gate` package on that network.
     pub access_gate_original_id: &'static str,
+    /// The original id of the sealed-storage package on that network.
     pub seal_original_id: &'static str,
 }
 
@@ -39,11 +42,15 @@ pub const DEFAULT_GRPC: &[(&str, &str)] =
 pub struct IngestConfig {
     /// The one network this instance indexes.
     pub network: String,
+    /// The full node's gRPC URL: `https`, or any scheme on `localhost` or `127.0.0.1` (validated; the error never repeats the value).
     pub grpc_url: String,
     /// The owner role's connection (DDL and writes). The ingester uses exactly one connection.
     pub database: DatabaseSettings,
+    /// The poll interval in milliseconds (1,000 to 3,600,000).
     pub poll_ms: u64,
+    /// The `access_gate` original package id, normalised to the long `0x` form.
     pub access_gate_original_id: String,
+    /// The sealed-storage original package id, normalised.
     pub seal_original_id: String,
     /// Streams whose stored history may be deleted and re-indexed after a package change.
     pub reindex_confirm: Vec<Stream>,
@@ -58,6 +65,7 @@ pub struct ApiConfig {
     pub database: DatabaseSettings,
     /// Connections in the API's pool.
     pub pool_size: usize,
+    /// The public API port.
     pub port: u16,
     /// Where `/metrics` is served, apart from the public API (never in the Service or the Ingress); 0 = off.
     pub metrics_port: u16,
@@ -74,6 +82,7 @@ pub struct ApiConfig {
 pub struct ConfigError(pub String);
 
 impl std::fmt::Display for ConfigError {
+    /// Write the message.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.0)
     }
@@ -81,6 +90,7 @@ impl std::fmt::Display for ConfigError {
 
 impl std::error::Error for ConfigError {}
 
+/// A result whose error is a [`ConfigError`].
 type Result<T> = std::result::Result<T, ConfigError>;
 
 /// A variable, treating empty as unset (`env.X || default` in the TypeScript).
@@ -88,6 +98,7 @@ fn var(env: &dyn Fn(&str) -> Option<String>, name: &str) -> Option<String> {
     env(name).filter(|v| !v.is_empty())
 }
 
+/// `NETWORK`, defaulting to `testnet`.
 fn network(env: &dyn Fn(&str) -> Option<String>) -> String {
     var(env, "NETWORK").unwrap_or_else(|| "testnet".into())
 }
@@ -132,6 +143,7 @@ fn js_number(raw: &str) -> Option<f64> {
     s.parse::<f64>().ok()
 }
 
+/// A bounded integer variable: the fallback when unset, otherwise a value in `[min, max]` read as JavaScript would read it, else an error naming the variable.
 fn int(env: &dyn Fn(&str) -> Option<String>, name: &str, fallback: u64, min: u64, max: u64) -> Result<u64> {
     let Some(raw) = var(env, name) else { return Ok(fallback) };
     match js_number(&raw) {
@@ -140,6 +152,7 @@ fn int(env: &dyn Fn(&str) -> Option<String>, name: &str, fallback: u64, min: u64
     }
 }
 
+/// The recorded deployment of a network, if there is one.
 fn deployment(network: &str) -> Option<&'static Deployment> {
     DEPLOYMENTS.iter().find(|d| d.network == network)
 }
@@ -172,11 +185,15 @@ fn reindex_confirm(env: &dyn Fn(&str) -> Option<String>) -> Result<Vec<Stream>> 
 
 /// `GRPC_URL` (or the network's public full node): `https`, or any scheme on `localhost`/`127.0.0.1`.
 fn grpc_url(env: &dyn Fn(&str) -> Option<String>, network: &str) -> Result<String> {
+    // The configured URL, else the network's public node; a network with neither cannot start.
     let url = var(env, "GRPC_URL")
         .or_else(|| DEFAULT_GRPC.iter().find(|(n, _)| *n == network).map(|(_, u)| (*u).to_owned()))
         .ok_or_else(|| ConfigError(format!("GRPC_URL is required for network {network}")))?;
+    // A URL with no `://` is not a URL; the error does not repeat it.
     let (scheme, rest) = url.split_once("://").ok_or_else(|| ConfigError("Invalid URL".into()))?;
+    // The authority ends at the first path, query or fragment mark.
     let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    // Anything before an `@` is credentials; it is dropped here and never shown.
     let host_port = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
     let host = if host_port.starts_with('[') {
         host_port.split_once(']').map_or(host_port, |(h, _)| h).trim_start_matches('[')
@@ -186,11 +203,31 @@ fn grpc_url(env: &dyn Fn(&str) -> Option<String>, network: &str) -> Result<Strin
     if scheme.is_empty() || host.is_empty() {
         return Err(ConfigError("Invalid URL".into()));
     }
+    // Host names compare case-insensitively.
     let host = host.to_ascii_lowercase();
+    // Plain http is allowed only to a local test node.
     if !scheme.eq_ignore_ascii_case("https") && host != "localhost" && host != "127.0.0.1" {
         return Err(ConfigError("GRPC_URL must use https".into()));
     }
     Ok(url)
+}
+
+/// Name a configured URL in a message without repeating anything that can carry a credential: only an
+/// `http` or `https` scheme, the host and the port are returned. A URL can hold a user name, a password,
+/// a token in its path or a key in its query, and a message reaches the log (CONF lens), so a value that is
+/// not a URL, has no host or has another scheme is described by a fixed phrase instead of being echoed.
+pub fn describe_url(url: &str) -> String {
+    let Some((scheme, rest)) = url.split_once("://") else { return "(not a valid URL)".into() };
+    if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") {
+        return "(an address that is not http or https)".into();
+    }
+    // The authority ends at the first `/`, `?` or `#`; anything before an `@` is a user name and password.
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let host_port = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
+    if host_port.is_empty() {
+        return "(an address with no host)".into();
+    }
+    format!("{}://{host_port}", scheme.to_ascii_lowercase())
 }
 
 impl IngestConfig {
@@ -202,6 +239,7 @@ impl IngestConfig {
     /// The ingester's configuration from `env`. Package ids default to the recorded deployments of
     /// the published client packages, so a normal deploy sets only `NETWORK`.
     pub fn load(env: &dyn Fn(&str) -> Option<String>) -> Result<IngestConfig> {
+        // The network decides the default node and the recorded package ids.
         let network = network(env);
         let grpc_url = grpc_url(env, &network)?;
         let database = database(env)?;
@@ -216,6 +254,7 @@ impl IngestConfig {
                 .map(|d| d.seal_original_id.to_owned())
                 .ok_or_else(|| ConfigError(format!("no sealed_storage deployment recorded for {network}")))
         })?;
+        // The operator's explicit permission to delete and re-index a stream after a package change.
         let reindex_confirm = reindex_confirm(env)?;
         Ok(IngestConfig {
             network,
@@ -250,11 +289,13 @@ impl ApiConfig {
     }
 }
 
+/// Unit tests for the configuration (pure functions over a fake environment).
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::HashMap;
 
+    /// A well-formed (throwaway) database URL for the tests.
     const URL: &str = "postgres://sui_indexer_api:a-long-throwaway-password@db.example:5432/sui_indexer?sslmode=verify-full&sslrootcert=/etc/postgres-ca/ca.crt";
 
     /// The environment of `pairs` plus a valid `DATABASE_URL` (unless the test sets its own).
@@ -264,18 +305,22 @@ mod tests {
         move |k| m.get(k).filter(|v| v.as_str() != "<unset>").cloned()
     }
 
+    /// Load the ingester configuration from key-value pairs.
     fn ingest(pairs: &[(&str, &str)]) -> Result<IngestConfig> {
         IngestConfig::load(&env(pairs))
     }
 
+    /// Load the API configuration from key-value pairs.
     fn api(pairs: &[(&str, &str)]) -> Result<ApiConfig> {
         ApiConfig::load(&env(pairs))
     }
 
+    /// The error message of a result that must be an error.
     fn err<T: std::fmt::Debug>(r: Result<T>) -> String {
         r.unwrap_err().0
     }
 
+    /// Defaults to testnet with the recorded package ids.
     #[test]
     fn defaults_to_testnet_with_the_recorded_package_ids() {
         let c = ingest(&[]).unwrap();
@@ -295,6 +340,7 @@ mod tests {
         assert_eq!(api(&[("PORT", ""), ("NETWORK", "")]).unwrap().port, 8080);
     }
 
+    /// The database url is required and validated without echoing it.
     #[test]
     fn the_database_url_is_required_and_validated_without_echoing_it() {
         let pw = "a-long-throwaway-password";
@@ -319,6 +365,7 @@ mod tests {
         assert!(!format!("{:?}", api(&[]).unwrap()).contains(pw));
     }
 
+    /// The pool size is bounded.
     #[test]
     fn the_pool_size_is_bounded() {
         assert_eq!(api(&[("DB_POOL_SIZE", "3")]).unwrap().pool_size, 3);
@@ -327,6 +374,21 @@ mod tests {
         }
     }
 
+    /// A URL is named by its scheme, host and port only, never its credentials, path or query.
+    #[test]
+    fn a_url_is_named_by_its_origin_only() {
+        let secret = "https://user:s3cret@node.example:443/tok3n/path?key=k3y#frag";
+        assert_eq!(describe_url(secret), "https://node.example:443");
+        for part in ["user", "s3cret", "tok3n", "k3y", "frag"] {
+            assert!(!describe_url(secret).contains(part), "{part}");
+        }
+        assert_eq!(describe_url("HTTP://Node.Example/x"), "http://Node.Example");
+        assert_eq!(describe_url("s3cret://host.example"), "(an address that is not http or https)");
+        assert_eq!(describe_url("user:s3cret@host.example"), "(not a valid URL)");
+        assert_eq!(describe_url("https://user:s3cret@"), "(an address with no host)");
+    }
+
+    /// Refuses bad values and unknown networks.
     #[test]
     fn refuses_bad_values_and_unknown_networks() {
         assert!(err(ingest(&[("POLL_MS", "10")])).contains("POLL_MS"));
@@ -343,6 +405,7 @@ mod tests {
         assert!(err(ingest(&[("GRPC_URL", "not a url")])).contains("Invalid URL"));
     }
 
+    /// Accepts what javascript number accepts.
     #[test]
     fn accepts_what_javascript_number_accepts() {
         assert_eq!(api(&[("PORT", " 8081 ")]).unwrap().port, 8081);
@@ -352,6 +415,7 @@ mod tests {
         assert!(api(&[("PORT", "Infinity")]).is_err());
     }
 
+    /// Plain http only for loopback.
     #[test]
     fn plain_http_only_for_loopback() {
         assert!(ingest(&[("GRPC_URL", "http://localhost:9000")]).is_ok());
@@ -372,6 +436,7 @@ mod tests {
         }
     }
 
+    /// Validates and normalises package id overrides.
     #[test]
     fn validates_and_normalises_package_id_overrides() {
         let c = ingest(&[("ACCESS_GATE_ORIGINAL_ID", "0xABC"), ("SEAL_ORIGINAL_ID", &format!("0x{}", "D".repeat(64)))])
@@ -391,6 +456,7 @@ mod tests {
         assert_eq!(local.network, "localnet");
     }
 
+    /// Reindex confirm lists streams.
     #[test]
     fn reindex_confirm_lists_streams() {
         assert_eq!(

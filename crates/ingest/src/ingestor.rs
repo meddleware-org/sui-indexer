@@ -25,6 +25,7 @@ pub type Logger = Box<dyn Fn(&str)>;
 /// Tuning of the poll loop.
 #[derive(Clone, Debug)]
 pub struct IngestOptions {
+    /// Which packages the two streams index.
     pub packages: Packages,
     /// Pages read per stream per poll, so one busy stream cannot starve the other (default 20).
     pub max_pages_per_poll: u32,
@@ -34,6 +35,7 @@ pub struct IngestOptions {
 }
 
 impl IngestOptions {
+    /// Options with the defaults: 20 pages per stream per poll and a 30 s per-request timeout.
     pub fn new(packages: Packages) -> IngestOptions {
         IngestOptions { packages, max_pages_per_poll: 20, request_timeout: Duration::from_secs(30) }
     }
@@ -51,14 +53,21 @@ pub fn is_pruned(message: &str) -> bool {
     m.contains("below earliest available") || m.contains("earliest available") || m.contains("has been pruned")
 }
 
+/// The poll loop's state: the store it writes, the event source it reads, its options, a log sink and the per-stream poll state (also persisted as the stream heartbeat).
 pub struct Ingestor<S> {
+    /// Where events and positions are written.
     store: Store,
+    /// Where events are read from (the full node, or a fake in tests).
     source: S,
+    /// The tuning in effect.
     opts: IngestOptions,
+    /// The log sink, one line per call.
     log: Logger,
+    /// The poll state of each stream, indexed by [`idx`].
     state: [PollState; 2],
 }
 
+/// The position of a stream in the state array.
 fn idx(stream: Stream) -> usize {
     match stream {
         Stream::AccessGate => 0,
@@ -67,6 +76,7 @@ fn idx(stream: Stream) -> usize {
 }
 
 impl<S: EventSource> Ingestor<S> {
+    /// Build an ingestor, resuming from the heartbeats the store already holds so a restart does not forget the last success.
     pub async fn new(store: Store, source: S, opts: IngestOptions, log: Logger) -> Ingestor<S> {
         // Continue from the persisted heartbeats, so a restart does not forget the last success.
         let mut state = [PollState::default(), PollState::default()];
@@ -76,14 +86,17 @@ impl<S: EventSource> Ingestor<S> {
         Ingestor { store, source, opts, log, state }
     }
 
+    /// The store this ingestor writes to.
     pub fn store(&self) -> &Store {
         &self.store
     }
 
+    /// The store, mutably (for tests and for binding the packages at start-up).
     pub fn store_mut(&mut self) -> &mut Store {
         &mut self.store
     }
 
+    /// The event source.
     pub fn source(&self) -> &S {
         &self.source
     }
@@ -98,6 +111,7 @@ impl<S: EventSource> Ingestor<S> {
         self.state.iter().map(|s| s.last_success_at).min().unwrap_or(0)
     }
 
+    /// Record that the loop is alive (a separate heartbeat from the success one), so a hung poll is told apart from a stopped process.
     async fn alive(&self) {
         if let Err(e) = self.store.touch_alive(now_ms()).await {
             (self.log)(&format!("liveness heartbeat failed: {e}"));

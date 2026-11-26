@@ -31,7 +31,9 @@ const GATE_KINDS: [&str; 6] =
 /// The packages the streams index.
 #[derive(Clone, Debug)]
 pub struct Packages {
+    /// The original package id of the `access_gate` package (its first published address, which event types keep across upgrades).
     pub access_gate_original_id: String,
+    /// The original package id of the `sealed_storage` package.
     pub seal_original_id: String,
 }
 
@@ -62,6 +64,7 @@ pub fn kind_of(stream: Stream, event_type: &str, p: &Packages) -> Option<(&'stat
     }
 }
 
+/// Read a required field of the node JSON for an event; the error names the field.
 fn field<'a>(json: &'a serde_json::Value, name: &str) -> Result<&'a serde_json::Value, String> {
     json.get(name).ok_or_else(|| format!("json has no `{name}`"))
 }

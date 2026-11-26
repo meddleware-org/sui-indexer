@@ -22,6 +22,8 @@ the findings keep their TS-era text and carry a 2026-10-19 re-verification again
 - AUDIT_TEMPLATE_SUI_CLIENT.md (2026-10-08) — chain reads: event filters, package IDs, type matching
 - AUDIT_TEMPLATE_IMG.md (2026-10-08) — `Dockerfile` + `docker-publish.yml` + the cluster manifests
 - AUDIT_TEMPLATE_DB.md (2026-10-25) — PostgreSQL tier, two roles (applied 2026-10-25)
+- **Added 2026-11-26 (Part B documentation pass):** AUDIT_TEMPLATE_DOCS.md (2026-11-20); AUDIT_TEMPLATE_RFC.md (2026-11-19), ●: HTTP caching and conditional requests, the Prometheus text format; AUDIT_TEMPLATE_IOP.md (2026-11-19), ●: the read API as the contract,
+  the data being re-derivable from the chain; AUDIT_TEMPLATE_PRIV.md (2026-11-20), ●: public chain data only, the client address in the rate limiter; AUDIT_TEMPLATE_CONF.md (2026-11-26), ●: the environment variables, `DATABASE_URL` and `GRPC_URL`.
 
 Not triggered: SUI (no Move code), SEAL, WALRUS, VUE, AUTH (no authentication: public read-only
 data), OPS (no signing or irreversible scripts), GO, WORKERS, PROXY (it serves its own data; it
@@ -1757,6 +1759,63 @@ mentions in the docs are history (this audit's older sections and log, the CHANG
 
 ---
 
+### Part B documentation pass (2026-11-26)
+
+Scope: every tracked file read against the workspace's `docs/operations/DOCUMENTATION_STANDARD.md` and annotated (Part B Phase 1, the twenty-fifth repository, the first of the Rust services); the DOCS, RFC, IOP, PRIV and CONF lenses applied for the
+first time. Before editing: `cargo test --workspace` (151 passed; the database tests need `TEST_DATABASE_URL` and return early without it, so this run did not exercise them). After: `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`
+with `missing_docs` and `clippy::missing_docs_in_private_items` now **denied** in `[workspace.lints]` (245 items had no doc comment, most of them fields), and `cargo test --workspace` (152 passed, the same database caveat). The Rust diff is comment-only
+apart from F34 (compared with comment lines stripped). The image build, the smoke test, `cargo deny` and the contract tests were not re-run here (no container daemon, no database); CI runs them.
+
+#### B.RFC-1 Standards inventory
+
+| Standard | Where | Evidence |
+| --- | --- | --- |
+| HTTP semantics, RFC 9110: GET, HEAD and OPTIONS, `405` with `Allow`, `304` for a matching `If-None-Match` (weak comparison, a list or `*`), `Retry-After` | `handler.rs` | the handler tests (`revalidates_with_weak_listed_or_wildcard_if_none_match`, `rate_limits_per_client_ip…`) |
+| Cache-Control `immutable`, RFC 8246: older pages never change | `handler.rs` `IMMUTABLE` | `serves_older_pages_as_immutable…` |
+| `429 Too Many Requests`, RFC 6585 | `handler.rs` | the rate-limit test |
+| URL parsing and form encoding (the WHATWG URL Standard): canonical queries and dot-segment resolution | `query.rs` | the unit and property tests |
+| Prometheus text exposition format 0.0.4 (a de facto format, not an IETF standard) | `handler.rs` `metrics` | `metrics_report_each_streams…` |
+| gRPC over HTTP/2 to the full node (the Sui `LedgerService`) | `ingest/src/source.rs` | the stub-service tests |
+
+**B.RFC-2 Non-final standards:** none on a core path; the Sui gRPC API is the node's own interface (SC lens). **B.RFC-3 Deviations:** none found.
+
+#### B.IOP Interoperability, portability and exit
+
+- **Portability and exit:** the database holds only events copied from the public chain, so nothing is held that cannot be re-derived: a successor re-indexes from a full node (history older than the node keeps is the one thing lost, which is why a package change needs an
+  explicit confirmation and a backup schema).
+- **Open API:** `GET /v1/<network>/...` (documented in the README, versioned in the path), public, read-only, no special access for our own clients; the client libraries fall back to the node when the index is stale.
+- **Dependencies (exit register):** the Sui full node, PostgreSQL, the `rust` and runtime base images, quay.io, Docker Hub, the self-hosted registry, GitHub Actions, Sigstore, Trivy and Cloudflare in front of the API; the build and release ones are replaceable by a rebuild from source.
+- **Incentives:** no telemetry, no ads, no tracking.
+
+#### B.PRIV Privacy honoured
+
+- **Browser storage:** none (a JSON API; no cookie is set).
+- **Data held:** public chain events (addresses and amounts that are already public and permanent on the chain), poll heartbeats and counters. Nothing about a visitor is stored.
+- **The client address:** read from `CF-Connecting-IP` (or the socket) only to key the in-memory rate limiter; IPv6 is reduced to its /64, the table is capped at 50,000 entries, and the address is never written to the log or the database.
+- **Logs:** start, stop, the database target (host, port and role, never the password), a throttled "database unavailable" line and the detail of an internal failure with the method and path (no query string).
+
+#### B.CONF Configuration and values
+
+- **Configuration surface:** `store/src/config.rs` (the ingester and the API read their variables through `IngestConfig` and `ApiConfig`), documented in the README and `CLAUDE.md`.
+- **Values that can carry a credential:** `DATABASE_URL` (a password) and `GRPC_URL` (a URL that may carry a user name or key).
+- **Echo sweep (2026-11-26):** every `format!`, `ConfigError`, `log` and `eprintln` read. `DATABASE_URL` was already never echoed (its errors say what is wrong and show a placeholder URL; the settings' `Debug` shows host, port, database and user only). The `GRPC_URL`
+  messages at start-up repeated the whole URL (F34, fixed).
+- **Validation:** each variable is parsed once at start-up with an error that names it; integers are range-checked.
+
+### F34 — Start-up messages repeated the full `GRPC_URL`
+**Severity:** Low   **Disposition:** RESOLVED (2026-11-26, unreleased)
+**Where:** `crates/ingest/src/main.rs` and `crates/ingest/src/lib.rs` (`start`): four messages ("cannot open the node", "did not report its chain identifier in time", "cannot read the chain identifier of …", "serves chain … not …").
+**Issue:** the node URL was interpolated whole. A URL written as `https://user:password@host/…?key=…` (a private node) would have put its credential in the container log. The database URL was already protected; the node URL was not.
+**Impact:** a credential in a log; small, because the value is operator-typed and the log is the operator's, but the log can be shipped elsewhere.
+**Remediation / evidence:** `describe_url` (in `store::config`) returns the scheme, host and port of an `http` or `https` URL and a fixed phrase for anything else; the four messages use it. `a_url_is_named_by_its_origin_only` asserts no user name, password, path token,
+query key or fragment survives, and that a non-URL, a non-http scheme and an address with no host get fixed phrases.
+
+### F35 — Documentation drift found by the documentation pass
+**Severity:** Low   **Disposition:** RESOLVED (2026-11-26, unreleased)
+**Where:** every crate (245 items without a doc comment, most of them fields; the doc lints were not on), the tests (no section comments), the workflows, scripts, `.dockerignore`, `dependabot.yml`, the Cargo manifests (no comments), `CHANGELOG.md` (no `Unreleased`
+section); there was no `CONTRIBUTING.md`.
+**Remediation / evidence:** every item documented and the lints denied; the documents and comments written; shell helpers moved their one-line usage comments above the function; `check-docs` for the repository passes.
+
 ## Section A — Invariant verification matrix
 
 Re-verified 2026-10-19 against the Rust code (0.0.12): file references below are the Rust ones where the
@@ -2485,6 +2544,10 @@ The four first-pass questions and OQ5-OQ7 are decided (OQ6 was superseded by OQ7
   - **Counts unchanged** (19 RESOLVED, 1 MITIGATED, 3 ADJUDICATED, 1 ACCEPTED-RISK, 0 DEFERRED, 8 Positive for F1–F32). F24 stays ADJUDICATED (the decision is the same; the gate that backed it is closed). The comparison script was run from a scratch directory and is not kept (it needs a funded key to generate events).
 - 2026-11-05 — delta review of 0.0.16–0.0.19 (the last substantive entry was the 2026-10-22 close-out; the 2026-10-30 entries closed the backup gate and moved the host). Read `git diff 05daa40~1..HEAD` for source: the only source lines that changed are log/error text and comments (`crates/ingest/src/lib.rs`, `crates/store/src/config.rs`, `crates/testkit/src/lib.rs`) plus manifests, `Dockerfile` and the contract-test `package.json`. Ran, with a pinned throwaway PostgreSQL 18 over `verify-full` TLS (`DOCKER=podman bash scripts/test-postgres.sh start`, `REQUIRE_TEST_DATABASE=1`): `cargo test --workspace --locked` — 144 tests (api 43, ingest 36, store 65), 0 failed, none skipped or ignored; `cargo fmt --check` and `cargo clippy --workspace --all-targets --locked -- -D warnings` clean; `cargo deny check` (advisories, bans, licences, sources ok). New F33 (the three advisory batches fixed by lockfile releases; RESOLVED, recorded as a standing control). Corrected the Deployment status, which still called 0.0.15 live and 0.0.16 unpinned (a current bullet is on top). Not run: the `tests/contract` client suite (it pins the published clients and needs the Node toolchain; the Dependabot bump of its `package.json` was reviewed by diff only), `scripts/smoke.sh` and the SBOM gate tests (container build). Lens check: A11Y not triggered (no UI); DB and RUST rows unchanged; base re-cited to the 2026-11-01 registry (it gained the A11Y code only). Counts: the 2026-10-22 counts plus 1 RESOLVED (F33): 20 RESOLVED, 1 MITIGATED (F3), 3 ADJUDICATED, 1 ACCEPTED-RISK (F28), 0 DEFERRED, 8 Positive — the 2026-10-30 backup entry did not restate F3/F28, so those two stay as last stated.
 
+- 2026-11-26 — Part B documentation pass and first application of the DOCS, RFC, IOP, PRIV and CONF lenses (above, "Part B documentation pass"). Baseline before editing: `cargo test --workspace` (151 passed). Every tracked file annotated to the
+  documentation standard; the doc lints denied; `CONTRIBUTING.md` added. Found and fixed **F34** (the node URL repeated in start-up messages) and **F35** (documentation drift). Re-run after editing: fmt, clippy `-D warnings`, `cargo test --workspace` (152 passed).
+  Counts: F1 to F35.
+
 ## Pre-save consistency checklist (this pass)
 
 - [x] Section A ↔ findings: A16–A24 are RUST rows (2026-10-19); A38–A42 HOLD (F22–F24, cutover); A43 does not
@@ -2514,3 +2577,4 @@ The four first-pass questions and OQ5-OQ7 are decided (OQ6 was superseded by OQ7
 - 2026-10-24 — identifier alignment (`docs/architecture/ADR-0004-identifier-alignment.md`): log/error text names `sealed_storage`; the event filters use module names and original ids, which did not change.
 - 2026-10-25 — DB lens applied (no code change). DB-M1 holds (F30: embedded, checksummed, advisory-locked migrations, newer schema refused); DB-M2 stated (CLAUDE.md *Schema identity*); DB-M3 holds (F27: owner `ingest`, SELECT-only `api`, role tests, cross-database refusal); DB-M4 holds (F13, parameterised; plan tests in `index_tests.rs`); DB-M5 holds (all rows are public chain data; no internal column); DB-M6 holds (CHECK/NOT NULL per *Schema identity*; ordered ids; unique event keys); DB-M7 holds (F32); DB-M8 holds (API `503` before the schema and on database loss, recovery tested); DB-M9 open — the offsite copy and a restore drill of `sui_indexer` (OPERATOR_TASKS, pre-mainnet; the index is rebuildable only within the node's ~5½-day retention); DB-M10 holds (no personal data: request IPs are not stored).
 - 2026-10-30 — F3/F28 backup gate closed: offsite R2 copy live; restore drills (in-cluster and offsite) restored `sui_indexer` with all 8 tables.
+- [x] 2026-11-26 (Part B pass): F34 and F35 added with the DOCS, RFC, IOP, PRIV and CONF lenses in the Template line; counts F1 to F35.

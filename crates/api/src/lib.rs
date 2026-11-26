@@ -3,9 +3,13 @@
 //! never migrates and has no chain access: freshness comes from the ingester's heartbeat rows
 //! (`heartbeats poll:<stream>`).
 
+/// Request handling: routing, validation, cache headers and the rate limit.
 pub mod handler;
+/// The query string and path canonicalisation (one cache entry per query).
 pub mod query;
+/// Per-client token buckets.
 pub mod ratelimit;
+/// The HTTP listeners.
 pub mod server;
 
 use std::sync::Mutex;
@@ -34,5 +38,6 @@ pub fn context(cfg: &ApiConfig) -> Result<ApiContext, sui_indexer_store::StoreEr
     })
 }
 
+/// The handler and server tests (they need a database; see `store::testdb`).
 #[cfg(test)]
 mod tests;

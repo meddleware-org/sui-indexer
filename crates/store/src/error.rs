@@ -19,6 +19,7 @@ pub enum StoreError {
 }
 
 impl fmt::Display for StoreError {
+    /// Show the database error's message and code when there is one, else the client error.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             StoreError::Pg(e) => match e.as_db_error() {
@@ -45,6 +46,7 @@ impl fmt::Display for StoreError {
 impl std::error::Error for StoreError {}
 
 impl From<tokio_postgres::Error> for StoreError {
+    /// Wrap a client error.
     fn from(e: tokio_postgres::Error) -> Self {
         StoreError::Pg(e)
     }

@@ -18,8 +18,11 @@ use crate::error::{Result, StoreError};
 
 /// One embedded migration.
 pub struct Migration {
+    /// The migration's version number; versions apply in order and are recorded once applied.
     pub version: i32,
+    /// A short name recorded with the version.
     pub name: &'static str,
+    /// The SQL text; its SHA-256 is recorded so a later edit of an applied migration is detected.
     pub sql: &'static str,
 }
 
@@ -33,6 +36,7 @@ pub const SCHEMA_VERSION: i32 = 1;
 /// The advisory-lock key serialising migrations (per database).
 pub const MIGRATION_LOCK_KEY: i64 = 0x5355_4958_4d49_4701;
 
+/// The SHA-256 of the migration text, as lower-case hex.
 fn checksum(sql: &str) -> String {
     Sha256::digest(sql.as_bytes()).iter().map(|b| format!("{b:02x}")).collect()
 }
@@ -98,10 +102,12 @@ pub async fn run(client: &mut Client) -> Result<Vec<i32>> {
     Ok(applied)
 }
 
+/// Unit tests for the migration list and checksums.
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// Migrations are numbered without gaps and the last is the schema version.
     #[test]
     fn migrations_are_numbered_without_gaps_and_the_last_is_the_schema_version() {
         for (i, m) in MIGRATIONS.iter().enumerate() {
@@ -111,6 +117,7 @@ mod tests {
         assert_eq!(MIGRATIONS.last().map(|m| m.version), Some(SCHEMA_VERSION));
     }
 
+    /// Checksums are stable sha256.
     #[test]
     fn checksums_are_stable_sha256() {
         assert_eq!(checksum(""), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");

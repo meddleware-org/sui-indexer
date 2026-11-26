@@ -11,15 +11,19 @@
 //! 4. poll every `POLL_MS` until SIGTERM/SIGINT, or until the database connection (which carries the
 //!    writer lock) is lost: then exit non-zero and let Kubernetes restart the pod.
 
+/// The Sui chain identifier mapping.
 pub mod chain;
+/// Turning full-node events into rows.
 pub mod decode;
+/// The poll loop.
 pub mod ingestor;
+/// The event source: the full node over gRPC.
 pub mod source;
 
 use std::future::Future;
 use std::time::Duration;
 
-use sui_indexer_store::config::IngestConfig;
+use sui_indexer_store::config::{IngestConfig, describe_url};
 use sui_indexer_store::time::{iso, now_ms};
 use sui_indexer_store::{BindError, DatabaseSettings, Store, Stream};
 
@@ -61,13 +65,21 @@ pub async fn start<S: EventSource>(cfg: &IngestConfig, source: S, log: Logger) -
     if let Some(want) = known_chain_id(&cfg.network) {
         let id = tokio::time::timeout(CHAIN_CHECK_TIMEOUT, source.chain_identifier())
             .await
-            .map_err(|_| format!("refusing to start: {} did not report its chain identifier in time", cfg.grpc_url))?
-            .map_err(|e| format!("refusing to start: cannot read the chain identifier of {}: {e}", cfg.grpc_url))?;
+            .map_err(|_| {
+                format!(
+                    "refusing to start: {} did not report its chain identifier in time",
+                    describe_url(&cfg.grpc_url)
+                )
+            })?
+            .map_err(|e| {
+                format!("refusing to start: cannot read the chain identifier of {}: {e}", describe_url(&cfg.grpc_url))
+            })?;
         let got = short_chain_id(&id).map_err(|e| format!("refusing to start: {e}"))?;
         if got != want {
             return Err(format!(
                 "refusing to start: {} serves chain {got}, not {} ({want})",
-                cfg.grpc_url, cfg.network
+                describe_url(&cfg.grpc_url),
+                cfg.network
             ));
         }
     }
@@ -133,5 +145,6 @@ pub async fn healthcheck(database: &DatabaseSettings, poll_ms: u64, now: i64) ->
     }
 }
 
+/// The poll loop and source tests (they need a database; see `store::testdb`).
 #[cfg(test)]
 mod tests;

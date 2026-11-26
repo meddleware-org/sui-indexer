@@ -16,11 +16,13 @@ use sui_indexer_store::time::now_ms;
 use sui_indexer_store::{DatabaseSettings, PollState, Stream};
 use sui_indexer_testkit::seed;
 
+/// Print the usage line and exit with status 2.
 fn usage() -> ! {
     eprintln!("usage: seed-fixture seed <ADMIN_URL> [poll-age-ms] | seed-fixture drop <ADMIN_URL> <database>");
     std::process::exit(2);
 }
 
+/// Seed a database for the end-to-end tests, or drop one (see `usage`).
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let mut args = std::env::args().skip(1);

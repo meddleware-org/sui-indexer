@@ -35,21 +35,28 @@ pub const PAGE_SIZE: u32 = 50;
 /// One event as the full node returned it.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RawEvent {
+    /// The fully qualified Move event type.
     pub event_type: String,
+    /// The Sui address that emitted the event.
     pub sender: String,
     /// The event's BCS bytes, stored unchanged.
     pub bcs: Vec<u8>,
     /// The node's JSON rendering of the event (`None` when the node sent none).
     pub json: Option<serde_json::Value>,
+    /// The checkpoint the event was in.
     pub checkpoint: Option<u64>,
+    /// The digest of the transaction that emitted the event.
     pub transaction_digest: Option<String>,
+    /// The event's position within its transaction.
     pub event_index: Option<u32>,
 }
 
 /// One page of a listing, ascending.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SourcePage {
+    /// The events of the page, oldest first.
     pub events: Vec<RawEvent>,
+    /// Whether the node has more events after this page.
     pub has_next_page: bool,
     /// Where the next page starts (base64 watermark cursor); `None` keeps the stored position.
     pub end_cursor: Option<String>,
@@ -60,18 +67,22 @@ pub struct SourcePage {
 /// else from the node's earliest data.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ListRequest {
+    /// The event-type filter: `package::module` or a full type.
     pub event_type: String,
+    /// The cursor to continue after, as the node gave it.
     pub after: Option<String>,
     /// Where to start when there is no cursor: a checkpoint the node still serves. Positions are
     /// stable across node upgrades, unlike the opaque cursor bytes (whose format changed once and made
     /// every stored cursor "invalid", 2026-11-10). Ignored when `after` is set.
     pub start_checkpoint: Option<u64>,
+    /// The most events to return.
     pub limit: u32,
 }
 
 /// The slice of the full node this indexer reads. Errors are the node's messages (matched against
 /// the pruned-cursor wording).
 pub trait EventSource {
+    /// List one page of events matching the request, ascending.
     fn list_events(&self, req: ListRequest) -> impl Future<Output = Result<SourcePage, String>>;
     /// The node's chain identifier: the base58 digest of the genesis checkpoint.
     fn chain_identifier(&self) -> impl Future<Output = Result<String, String>>;
@@ -83,6 +94,7 @@ pub trait EventSource {
 /// One stream frame, reduced to what the page logic reads.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Frame {
+    /// The event carried by this frame, if it carries one.
     pub event: Option<RawEvent>,
     /// `watermark.cursor` when present.
     pub cursor: Option<Vec<u8>>,
@@ -93,15 +105,22 @@ pub struct Frame {
 /// Collects one page from a `ListEvents` stream requested with `limit + 1` items.
 #[derive(Debug)]
 pub struct PageBuilder {
+    /// The page size requested (the stream is asked for one more, to learn whether a next page exists).
     limit: usize,
+    /// The events kept so far, at most `limit`.
     events: Vec<RawEvent>,
+    /// The cursor to continue after the last kept event.
     end_cursor: Option<String>,
+    /// The most recent cursor seen on the stream.
     frontier: Option<String>,
+    /// The terminal frame's end reason, once seen.
     end: Option<Option<i32>>,
+    /// Whether an event beyond `limit` was seen, which proves a next page exists.
     saw_lookahead: bool,
 }
 
 impl PageBuilder {
+    /// A builder for a page of at most `limit` events.
     pub fn new(limit: u32) -> PageBuilder {
         PageBuilder {
             limit: limit as usize,
@@ -113,6 +132,7 @@ impl PageBuilder {
         }
     }
 
+    /// Fold one stream frame into the page: remember the cursor, keep or count the event, note the end.
     pub fn push(&mut self, frame: Frame) {
         if let Some(c) = frame.cursor {
             self.frontier = Some(B64.encode(c));
@@ -130,6 +150,7 @@ impl PageBuilder {
         }
     }
 
+    /// Finish the page: whether there is a next page, and the cursor to continue from.
     pub fn finish(self) -> SourcePage {
         let reason = self.end.flatten();
         let has_next_page = self.saw_lookahead
@@ -231,16 +252,19 @@ pub fn status_message(s: &tonic::Status) -> String {
 /// The full node over gRPC (`sui_rpc::Client`: TLS with the webpki roots, HTTP/2).
 #[derive(Clone)]
 pub struct GrpcSource {
+    /// The gRPC client, cheap to clone.
     client: sui_rpc::Client,
 }
 
 impl GrpcSource {
+    /// Open a client for the node at `url`; the error text is the node status message.
     pub fn new(url: &str) -> Result<GrpcSource, String> {
         sui_rpc::Client::new(url.to_owned()).map(|client| GrpcSource { client }).map_err(|s| status_message(&s))
     }
 }
 
 impl EventSource for GrpcSource {
+    /// Fetch one page over gRPC and fold its stream frames into a page.
     async fn list_events(&self, req: ListRequest) -> Result<SourcePage, String> {
         let request = grpc_request(&req)?;
         let mut ledger = self.client.clone().ledger_client();
@@ -252,12 +276,14 @@ impl EventSource for GrpcSource {
         Ok(page.finish())
     }
 
+    /// Ask the node for its service info and return the chain identifier.
     async fn chain_identifier(&self) -> Result<String, String> {
         let mut ledger = self.client.clone().ledger_client();
         let info = ledger.get_service_info(GetServiceInfoRequest::default()).await.map_err(|s| status_message(&s))?;
         info.into_inner().chain_id.ok_or_else(|| "the node reported no chain identifier".to_owned())
     }
 
+    /// Ask the node for its service info and return the lowest checkpoint it still serves.
     async fn lowest_available_checkpoint(&self) -> Result<u64, String> {
         let mut ledger = self.client.clone().ledger_client();
         let info = ledger.get_service_info(GetServiceInfoRequest::default()).await.map_err(|s| status_message(&s))?;

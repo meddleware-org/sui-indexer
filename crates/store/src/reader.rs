@@ -43,6 +43,7 @@ pub enum ReadError {
 }
 
 impl std::fmt::Display for ReadError {
+    /// Show the failure class and its message.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ReadError::NotReady(m) => write!(f, "index not ready: {m}"),
@@ -55,6 +56,7 @@ impl std::fmt::Display for ReadError {
 impl std::error::Error for ReadError {}
 
 impl From<StoreError> for ReadError {
+    /// Wrap a store error.
     fn from(e: StoreError) -> Self {
         ReadError::Store(e)
     }
@@ -74,7 +76,9 @@ fn chain(e: &dyn std::error::Error) -> String {
 
 /// The API's handle on the database: a lazily connecting pool.
 pub struct Reader {
+    /// The pool of read-only connections; it connects on first use, so the API starts before the database is up.
     pool: Pool,
+    /// Whether the schema has been found ready once; later requests skip the check.
     ready: AtomicBool,
 }
 

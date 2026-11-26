@@ -18,21 +18,27 @@ use crate::decode::{Packages, kind_of, stream_filter, to_indexed};
 use crate::ingestor::{IngestOptions, Ingestor, is_pruned};
 use crate::source::{EventSource, Frame, ListRequest, PageBuilder, RawEvent, SourcePage, grpc_request};
 
+/// The testnet genesis digest, as `GetServiceInfo` reports a testnet chain id.
 const TESTNET_GENESIS: &str = "69WiPg3DAQiwdxfncX6wYQ2siKwAe6L9BZthQea3JNMD";
+/// The mainnet genesis digest.
 const MAINNET_GENESIS: &str = "4btiuiMPvEENsttpZC7CZ53DruC3MAgfznDbASZ7DR6S";
 
+/// The fixtures' package ids as the packages the streams index.
 fn packages() -> Packages {
     Packages { access_gate_original_id: kit::ag(), seal_original_id: kit::seal() }
 }
 
+/// The access-gate stream's event filter for the fixtures.
 fn ag_filter() -> String {
     format!("{}::access_gate", kit::ag())
 }
 
+/// The sealed-content stream's event filter for the fixtures.
 fn seal_filter() -> String {
     format!("{}::sealed_content::SealedContentPublished", kit::seal())
 }
 
+/// A fixture as the raw event the full node would return.
 fn raw(f: &Fixture) -> RawEvent {
     RawEvent {
         event_type: f.event_type.clone(),
@@ -45,6 +51,7 @@ fn raw(f: &Fixture) -> RawEvent {
     }
 }
 
+/// A function that answers a listing request, so a test can script the node.
 type Handler = Box<dyn Fn(&ListRequest) -> Result<SourcePage, String>>;
 
 /// A scripted full node.
@@ -58,9 +65,11 @@ struct Fake {
 }
 
 impl Fake {
+    /// A scripted node answering with `handler`, on testnet, serving everything.
     fn new(handler: Handler) -> Fake {
         Fake { handler, calls: RefCell::new(vec![]), chain: Ok(TESTNET_GENESIS.into()), hang: false, lowest: Ok(0) }
     }
+    /// The same node with a lowest served checkpoint, to simulate pruned history.
     fn with_lowest(mut self, lowest: u64) -> Fake {
         self.lowest = Ok(lowest);
         self
@@ -68,6 +77,7 @@ impl Fake {
 }
 
 impl EventSource for Fake {
+    /// Record the request, optionally hang, then answer with the script.
     async fn list_events(&self, req: ListRequest) -> Result<SourcePage, String> {
         self.calls.borrow_mut().push(req.clone());
         if self.hang {
@@ -75,14 +85,17 @@ impl EventSource for Fake {
         }
         (self.handler)(&req)
     }
+    /// The scripted chain identifier.
     async fn chain_identifier(&self) -> Result<String, String> {
         self.chain.clone()
     }
+    /// The scripted lowest checkpoint.
     async fn lowest_available_checkpoint(&self) -> Result<u64, String> {
         self.lowest.clone()
     }
 }
 
+/// The pages each event-type filter serves, in order.
 type Pages = Rc<RefCell<HashMap<String, Vec<Vec<RawEvent>>>>>;
 
 /// A full node serving `pages[filter]` in ascending order (cursor = page index), like the
@@ -99,12 +112,15 @@ fn paged(pages: Pages) -> Handler {
     })
 }
 
+/// Build a [`Pages`] table from entries.
 fn pages(entries: Vec<(String, Vec<Vec<RawEvent>>)>) -> Pages {
     Rc::new(RefCell::new(entries.into_iter().collect()))
 }
 
+/// The log lines an ingestor wrote.
 type Logs = Rc<RefCell<Vec<String>>>;
 
+/// An ingestor over a fresh store, the scripted node and options, with its log lines collected.
 async fn ingestor_with(db: &TestDb, source: Fake, opts: IngestOptions) -> (Ingestor<Fake>, Logs) {
     let logs: Logs = Rc::default();
     let sink = logs.clone();
@@ -112,12 +128,14 @@ async fn ingestor_with(db: &TestDb, source: Fake, opts: IngestOptions) -> (Inges
     (Ingestor::new(db.store().await, source, opts, log).await, logs)
 }
 
+/// The same with the default options.
 async fn ingestor(db: &TestDb, source: Fake) -> (Ingestor<Fake>, Logs) {
     ingestor_with(db, source, IngestOptions::new(packages())).await
 }
 
 // ── to_indexed ──────────────────────────────────────────────────────────────
 
+/// Keeps kind gate and commission from the json rendering.
 #[test]
 fn keeps_kind_gate_and_commission_from_the_json_rendering() {
     let p = packages();
@@ -139,6 +157,7 @@ fn keeps_kind_gate_and_commission_from_the_json_rendering() {
     assert_eq!(row.sender, addr("0xa11ce"));
 }
 
+/// Every kind maps from its struct name.
 #[test]
 fn every_kind_maps_from_its_struct_name() {
     let p = packages();
@@ -150,6 +169,7 @@ fn every_kind_maps_from_its_struct_name() {
     }
 }
 
+/// Drops events of another package module or struct.
 #[test]
 fn drops_events_of_another_package_module_or_struct() {
     let p = packages();
@@ -172,10 +192,12 @@ fn drops_events_of_another_package_module_or_struct() {
     assert_eq!(to_indexed(Stream::SealedContent, &raw(&minted(&gate_a(), 1, 1)), &p), Ok(None));
 }
 
+/// A recognised event without what the row needs is undecodable.
 #[test]
 fn a_recognised_event_without_what_the_row_needs_is_undecodable() {
     let p = packages();
     let base = raw(&minted(&gate_a(), 1, 1));
+    /// A way to break one field of a raw event.
     type Mutation = Box<dyn Fn(&mut RawEvent)>;
     let cases: Vec<(&str, Mutation)> = vec![
         ("no json", Box::new(|e| e.json = None)),
@@ -207,6 +229,7 @@ fn a_recognised_event_without_what_the_row_needs_is_undecodable() {
     assert!(to_indexed(Stream::AccessGate, &u, &p).unwrap().is_some());
 }
 
+/// Polls the whole access gate module and the one sealed content event.
 #[test]
 fn polls_the_whole_access_gate_module_and_the_one_sealed_content_event() {
     assert_eq!(stream_filter(Stream::AccessGate, &packages()), ag_filter());
@@ -215,6 +238,7 @@ fn polls_the_whole_access_gate_module_and_the_one_sealed_content_event() {
 
 // ── The poll loop ───────────────────────────────────────────────────────────
 
+/// Stores every page with its cursor ascending and resumes from the cursor.
 #[tokio::test]
 async fn stores_every_page_with_its_cursor_ascending_and_resumes_from_the_cursor() {
     let db = require_db!();
@@ -255,6 +279,7 @@ async fn stores_every_page_with_its_cursor_ascending_and_resumes_from_the_cursor
     assert!(ing.store().verify_counters().await.unwrap().is_empty());
 }
 
+/// Keeps the cursor when the node reports no position.
 #[tokio::test]
 async fn keeps_the_cursor_when_the_node_reports_no_position() {
     let db = require_db!();
@@ -264,6 +289,7 @@ async fn keeps_the_cursor_when_the_node_reports_no_position() {
     assert_eq!(ing.store().cursor(Stream::AccessGate).await.unwrap().as_deref(), Some("kept"));
 }
 
+/// Bounds every full node request.
 #[tokio::test]
 async fn bounds_every_full_node_request() {
     let db = require_db!();
@@ -276,6 +302,7 @@ async fn bounds_every_full_node_request() {
     assert!(err.contains("timed out"), "{err}");
 }
 
+/// Stops at the page budget so one stream cannot starve the other.
 #[tokio::test]
 async fn stops_at_the_page_budget_so_one_stream_cannot_starve_the_other() {
     let db = require_db!();
@@ -287,6 +314,7 @@ async fn stops_at_the_page_budget_so_one_stream_cannot_starve_the_other() {
     assert_eq!(ing.store().coverage(Stream::AccessGate).await.unwrap().events, 2);
 }
 
+/// A stored row is the nodes event byte for byte.
 #[tokio::test]
 async fn a_stored_row_is_the_nodes_event_byte_for_byte() {
     let db = require_db!();
@@ -305,6 +333,7 @@ async fn a_stored_row_is_the_nodes_event_byte_for_byte() {
     assert_eq!(row.sender, addr(&f.sender));
 }
 
+/// Skips and counts an undecodable event keeps its page mates and advances.
 #[tokio::test]
 async fn skips_and_counts_an_undecodable_event_keeps_its_page_mates_and_advances() {
     let db = require_db!();
@@ -320,6 +349,7 @@ async fn skips_and_counts_an_undecodable_event_keeps_its_page_mates_and_advances
     assert!(logs.borrow().iter().any(|l| l.contains("UNDECODABLE")));
 }
 
+/// Skips unrecognised events and logs how many.
 #[tokio::test]
 async fn skips_unrecognised_events_and_logs_how_many() {
     let db = require_db!();
@@ -334,6 +364,7 @@ async fn skips_unrecognised_events_and_logs_how_many() {
     assert!(logs.borrow().iter().any(|l| l == "access-gate: skipped 1 unrecognised event(s)"));
 }
 
+/// Polls the streams independently and health names the failing one.
 #[tokio::test]
 async fn polls_the_streams_independently_and_health_names_the_failing_one() {
     let db = require_db!();
@@ -359,6 +390,7 @@ async fn polls_the_streams_independently_and_health_names_the_failing_one() {
     assert!(ing.store().heartbeat(ALIVE_KEY).await.unwrap().is_some());
 }
 
+/// Restarts from the nodes earliest data when the cursor fell below its retention.
 #[tokio::test]
 async fn restarts_from_the_nodes_earliest_data_when_the_cursor_fell_below_its_retention() {
     let db = require_db!();
@@ -391,6 +423,7 @@ async fn restarts_from_the_nodes_earliest_data_when_the_cursor_fell_below_its_re
     assert!(ing.source().calls.borrow().len() > 1);
 }
 
+/// A cursor the node no longer decodes resumes from the last stored checkpoint without a gap.
 #[tokio::test]
 async fn a_cursor_the_node_no_longer_decodes_resumes_from_the_last_stored_checkpoint_without_a_gap() {
     // 2026-11-10: the node changed its cursor format, so the stored cursor became "invalid cursor"
@@ -425,6 +458,7 @@ async fn a_cursor_the_node_no_longer_decodes_resumes_from_the_last_stored_checkp
     assert!(logs.borrow().iter().any(|l| l.contains("resuming from checkpoint 50")));
 }
 
+/// An invalid cursor whose data was also pruned is a counted gap.
 #[tokio::test]
 async fn an_invalid_cursor_whose_data_was_also_pruned_is_a_counted_gap() {
     let db = require_db!();
@@ -454,6 +488,7 @@ async fn an_invalid_cursor_whose_data_was_also_pruned_is_a_counted_gap() {
     assert_eq!(ing.health(Stream::AccessGate).last_error, None);
 }
 
+/// A refused cursor is not reset when the node cannot say what it serves.
 #[tokio::test]
 async fn a_refused_cursor_is_not_reset_when_the_node_cannot_say_what_it_serves() {
     // Without the lowest served checkpoint the ingester cannot tell a format change from a gap: it
@@ -475,6 +510,7 @@ async fn a_refused_cursor_is_not_reset_when_the_node_cannot_say_what_it_serves()
     assert!(err.contains("invalid cursor") && err.contains("unavailable"), "{err}");
 }
 
+/// Refused cursor wording.
 #[test]
 fn refused_cursor_wording() {
     use crate::ingestor::is_refused_cursor;
@@ -484,6 +520,7 @@ fn refused_cursor_wording() {
     assert!(!is_refused_cursor("503 from fullnode"));
 }
 
+/// A request without a cursor starts at the given checkpoint and a cursor wins over it.
 #[test]
 fn a_request_without_a_cursor_starts_at_the_given_checkpoint_and_a_cursor_wins_over_it() {
     let r = grpc_request(&ListRequest { event_type: ag_filter(), after: None, start_checkpoint: Some(42), limit: 50 })
@@ -499,6 +536,7 @@ fn a_request_without_a_cursor_starts_at_the_given_checkpoint_and_a_cursor_wins_o
     assert_eq!(r.start_checkpoint, None, "the cursor is the position; the checkpoint is ignored");
 }
 
+/// Does not swallow other failures as a gap.
 #[tokio::test]
 async fn does_not_swallow_other_failures_as_a_gap() {
     let db = require_db!();
@@ -510,6 +548,7 @@ async fn does_not_swallow_other_failures_as_a_gap() {
     assert_eq!(ing.health(Stream::AccessGate).last_error.as_deref(), Some("503 from fullnode"));
 }
 
+/// A pruned message without a stored cursor is a plain failure.
 #[tokio::test]
 async fn a_pruned_message_without_a_stored_cursor_is_a_plain_failure() {
     let db = require_db!();
@@ -519,6 +558,7 @@ async fn a_pruned_message_without_a_stored_cursor_is_a_plain_failure() {
     assert_eq!(ing.health(Stream::AccessGate).last_error.as_deref(), Some("data has been pruned"));
 }
 
+/// Pruned wording.
 #[test]
 fn pruned_wording() {
     for m in ["requested data below earliest available", "Earliest Available checkpoint is 9", "has been pruned"] {
@@ -527,6 +567,7 @@ fn pruned_wording() {
     assert!(!is_pruned("503 from fullnode"));
 }
 
+/// A restart continues from the persisted heartbeat.
 #[tokio::test]
 async fn a_restart_continues_from_the_persisted_heartbeat() {
     let db = require_db!();
@@ -554,19 +595,23 @@ async fn a_restart_continues_from_the_persisted_heartbeat() {
 
 // ── Page assembly from stream frames (core.listEvents semantics) ───────────
 
+/// A raw event that carries only a transaction digest.
 fn ev(n: u64) -> RawEvent {
     RawEvent { transaction_digest: Some(format!("t{n}")), ..Default::default() }
 }
 
+/// A stream frame with an optional event, cursor byte and end reason.
 fn f(event: Option<u64>, cursor: Option<u8>, end: Option<i32>) -> Frame {
     Frame { event: event.map(ev), cursor: cursor.map(|c| vec![c]), end: end.map(Some) }
 }
 
+/// A cursor byte as the base64 page cursor.
 fn b64(c: u8) -> Option<String> {
     use base64::Engine;
     Some(base64::engine::general_purpose::STANDARD.encode([c]))
 }
 
+/// Feed frames through a page builder and return the page.
 fn build(limit: u32, frames: Vec<Frame>) -> SourcePage {
     let mut b = PageBuilder::new(limit);
     for fr in frames {
@@ -575,6 +620,7 @@ fn build(limit: u32, frames: Vec<Frame>) -> SourcePage {
     b.finish()
 }
 
+/// A page ending at the ledger tip has no next page and ends at its last event.
 #[test]
 fn a_page_ending_at_the_ledger_tip_has_no_next_page_and_ends_at_its_last_event() {
     let p = build(50, vec![f(Some(1), Some(1), None), f(Some(2), Some(2), None), f(None, Some(9), Some(5))]);
@@ -583,6 +629,7 @@ fn a_page_ending_at_the_ledger_tip_has_no_next_page_and_ends_at_its_last_event()
     assert_eq!(p.end_cursor, b64(2));
 }
 
+/// The look ahead item marks a next page and is not returned.
 #[test]
 fn the_look_ahead_item_marks_a_next_page_and_is_not_returned() {
     let p = build(2, vec![f(Some(1), Some(1), None), f(Some(2), Some(2), None), f(Some(3), Some(3), Some(1))]);
@@ -591,6 +638,7 @@ fn the_look_ahead_item_marks_a_next_page_and_is_not_returned() {
     assert_eq!(p.end_cursor, b64(2));
 }
 
+/// A scan limit resumes from the scan frontier.
 #[test]
 fn a_scan_limit_resumes_from_the_scan_frontier() {
     let p = build(50, vec![f(Some(1), Some(1), None), f(None, Some(7), None), f(None, Some(8), Some(2))]);
@@ -601,6 +649,7 @@ fn a_scan_limit_resumes_from_the_scan_frontier() {
     assert_eq!((empty.events.len(), empty.has_next_page, empty.end_cursor), (0, true, b64(4)));
 }
 
+/// An empty page at the tip reports no position.
 #[test]
 fn an_empty_page_at_the_tip_reports_no_position() {
     let p = build(50, vec![f(None, Some(4), Some(5))]);
@@ -608,6 +657,7 @@ fn an_empty_page_at_the_tip_reports_no_position() {
     assert_eq!(build(50, vec![]), SourcePage::default());
 }
 
+/// Item limit on the last item means more.
 #[test]
 fn item_limit_on_the_last_item_means_more() {
     let p = build(2, vec![f(Some(1), Some(1), None), f(Some(2), Some(2), Some(1))]);
@@ -640,6 +690,7 @@ proptest! {
     }
 }
 
+/// The grpc request is core list events ascending with one look ahead item.
 #[test]
 fn the_grpc_request_is_core_list_events_ascending_with_one_look_ahead_item() {
     let r = grpc_request(&ListRequest {
@@ -685,6 +736,7 @@ fn the_grpc_request_is_core_list_events_ascending_with_one_look_ahead_item() {
 
 // ── The real client against a local LedgerService ──────────────────────────
 
+/// A local gRPC ledger service for the tests of the real client.
 mod stub {
     use std::pin::Pin;
     use std::sync::{Arc, Mutex};
@@ -696,8 +748,10 @@ mod stub {
     };
     use tokio_stream::Stream;
 
+    /// A function that answers a listing request with stream frames.
     type Frames = Box<dyn Fn(&ListEventsRequest) -> Result<Vec<ListEventsResponse>, tonic::Status> + Send + Sync>;
 
+    /// A local LedgerService that records requests and answers from a script, so the real client is tested over a socket.
     pub struct Stub {
         pub requests: Arc<Mutex<Vec<ListEventsRequest>>>,
         pub frames: Frames,
@@ -706,6 +760,7 @@ mod stub {
 
     #[tonic::async_trait]
     impl LedgerService for Stub {
+        /// Answer the service-info call with the configured chain id.
         async fn get_service_info(
             &self,
             _: tonic::Request<GetServiceInfoRequest>,
@@ -715,6 +770,7 @@ mod stub {
             Ok(tonic::Response::new(r))
         }
 
+        /// Record the request and stream the scripted frames.
         async fn list_events(
             &self,
             request: tonic::Request<ListEventsRequest>,
@@ -729,6 +785,7 @@ mod stub {
         }
     }
 
+    /// One stream frame with an optional event, a watermark cursor and an optional end reason.
     pub fn frame(event: Option<Event>, cursor: &[u8], end: Option<i32>) -> ListEventsResponse {
         let mut w = Watermark::default();
         w.cursor = Some(cursor.to_vec().into());
@@ -743,6 +800,7 @@ mod stub {
         r
     }
 
+    /// A fixture as the protobuf event the node would send.
     pub fn event(f: &sui_indexer_testkit::Fixture) -> Event {
         let mut bcs = Bcs::default();
         bcs.value = Some(f.bcs.clone().into());
@@ -757,6 +815,7 @@ mod stub {
         e
     }
 
+    /// Convert JSON to the protobuf value type the node uses for event JSON.
     pub fn to_value(j: &serde_json::Value) -> prost_types::Value {
         use prost_types::value::Kind;
         let kind = match j {
@@ -789,6 +848,7 @@ mod stub {
     }
 }
 
+/// The grpc source reads list events frames and the chain identifier.
 #[tokio::test]
 async fn the_grpc_source_reads_list_events_frames_and_the_chain_identifier() {
     use std::sync::{Arc, Mutex};
@@ -853,6 +913,7 @@ async fn the_grpc_source_reads_list_events_frames_and_the_chain_identifier() {
     assert_eq!(real.store().coverage(Stream::AccessGate).await.unwrap().events, 2);
 }
 
+/// An unreachable node is an error not a hang.
 #[tokio::test]
 async fn an_unreachable_node_is_an_error_not_a_hang() {
     use crate::source::GrpcSource;
@@ -870,11 +931,13 @@ async fn an_unreachable_node_is_an_error_not_a_hang() {
 
 // ── Startup wiring (main) ──────────────────────────────────────────────────
 
+/// The ingester configuration over the test database's owner role and the fixture packages.
 fn cfg(db: &TestDb) -> sui_indexer_store::config::IngestConfig {
     let env = db.env(&db.owner, &[("ACCESS_GATE_ORIGINAL_ID", &kit::ag()), ("SEAL_ORIGINAL_ID", &kit::seal())]);
     sui_indexer_store::config::IngestConfig::load(&env).unwrap()
 }
 
+/// A logger that discards everything.
 fn quiet() -> Logger {
     Box::new(|_| {})
 }
@@ -891,6 +954,7 @@ async fn backup_schemas(db: &TestDb) -> Vec<String> {
         .collect()
 }
 
+/// Start refuses a node of another chain.
 #[tokio::test]
 async fn start_refuses_a_node_of_another_chain() {
     let db = require_db!();
@@ -904,6 +968,7 @@ async fn start_refuses_a_node_of_another_chain() {
     assert!(err.contains("cannot read the chain identifier"), "{err}");
 }
 
+/// Start refuses a second ingester while one is running.
 #[tokio::test]
 async fn start_refuses_a_second_ingester_while_one_is_running() {
     let db = require_db!();
@@ -917,6 +982,7 @@ async fn start_refuses_a_second_ingester_while_one_is_running() {
     assert!(!first.store().is_closed());
 }
 
+/// Start refuses a package change until confirmed then backs up and reindexes.
 #[tokio::test]
 async fn start_refuses_a_package_change_until_confirmed_then_backs_up_and_reindexes() {
     let db = require_db!();
@@ -948,6 +1014,7 @@ async fn start_refuses_a_package_change_until_confirmed_then_backs_up_and_reinde
     assert!(logs.borrow().iter().any(|l| l.contains("package changed for access-gate") && l.contains(&backups[0])));
 }
 
+/// The loop polls every interval and stops on shutdown.
 #[tokio::test]
 async fn the_loop_polls_every_interval_and_stops_on_shutdown() {
     let db = require_db!();
@@ -961,6 +1028,7 @@ async fn the_loop_polls_every_interval_and_stops_on_shutdown() {
     assert_eq!(ing.store().coverage(Stream::AccessGate).await.unwrap().events, 1);
 }
 
+/// The loop stops when the connection carrying the writer lock is lost.
 #[tokio::test]
 async fn the_loop_stops_when_the_connection_carrying_the_writer_lock_is_lost() {
     let db = require_db!();
@@ -978,6 +1046,7 @@ async fn the_loop_stops_when_the_connection_carrying_the_writer_lock_is_lost() {
     assert!(outcome.unwrap_err().contains("writer lock"), "the loop must end with an error, not retry");
 }
 
+/// The healthcheck follows the liveness heartbeat and the database.
 #[tokio::test]
 async fn the_healthcheck_follows_the_liveness_heartbeat_and_the_database() {
     let db = require_db!();

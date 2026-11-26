@@ -17,6 +17,7 @@ use crate::db::DatabaseSettings;
 use crate::reader::Reader;
 use crate::writer::{ConnectOptions, Store};
 
+/// `bytes` random bytes as lower-case hex, for unique database and role names.
 fn random_hex(bytes: usize) -> String {
     let mut b = vec![0u8; bytes];
     getrandom::fill(&mut b).expect("the OS random source is available");
@@ -46,9 +47,13 @@ pub fn admin_settings() -> Option<DatabaseSettings> {
 
 /// An isolated, provisioned database.
 pub struct TestDb {
+    /// The administrator settings used to create and drop the database.
     admin: DatabaseSettings,
+    /// The database name (random, prefixed `si_t_`).
     pub name: String,
+    /// The owner role's name.
     pub owner_role: String,
+    /// The SELECT-only role's name.
     pub api_role: String,
     /// The owner role (what the ingester uses).
     pub owner: DatabaseSettings,
@@ -62,6 +67,7 @@ async fn admin_client(admin: &DatabaseSettings, db: &str) -> Client {
     s.connect().await.expect("connect as the test admin")
 }
 
+/// The administrator's password, read back from the parsed settings (the settings keep it only inside the URL).
 fn admin_password(admin: &DatabaseSettings) -> String {
     // The settings keep the password inside the URL only; read it back from the parsed config.
     String::from_utf8_lossy(admin.pg_config().get_password().unwrap_or_default()).into_owned()
@@ -86,6 +92,7 @@ impl TestDb {
         Some(Self::create_on(admin).await)
     }
 
+    /// Create the database and its two roles on the given administrator connection.
     async fn create_on(admin: DatabaseSettings) -> TestDb {
         let tag = random_hex(6);
         let name = format!("si_t_{tag}");
@@ -179,6 +186,7 @@ pub async fn drop_database(admin: &DatabaseSettings, name: &str) {
 }
 
 impl Drop for TestDb {
+    /// Drop the database and its roles when the test ends, from a separate thread and runtime (the test's own runtime may be shutting down).
     fn drop(&mut self) {
         let (admin, name) = (self.admin.clone(), self.name.clone());
         // A separate thread and runtime: this can run while the test's own runtime is shutting down.

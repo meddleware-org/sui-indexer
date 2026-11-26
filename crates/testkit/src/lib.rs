@@ -11,6 +11,7 @@ use serde_json::{Value, json};
 use sui_indexer_store::sui::normalize_sui_address;
 use sui_indexer_store::{IndexedEvent, Store, Stream};
 
+/// The long `0x` form of a short address (the node renders addresses long).
 pub fn addr(s: &str) -> String {
     normalize_sui_address(s)
 }
@@ -23,15 +24,19 @@ pub fn ag() -> String {
 pub fn seal() -> String {
     addr("0x5e")
 }
+/// The first fixture gate's id.
 pub fn gate_a() -> String {
     addr("0xa")
 }
+/// The second fixture gate's id.
 pub fn gate_b() -> String {
     addr("0xb")
 }
+/// A fixture access NFT id.
 fn nft() -> String {
     addr("0x11")
 }
+/// A fixture user address.
 fn alice() -> String {
     addr("0xa11ce")
 }
@@ -39,17 +44,25 @@ fn alice() -> String {
 /// A full-node event entry (what `ListEvents` returns for one event).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Fixture {
+    /// The fully qualified Move event type.
     pub event_type: String,
     /// As the node may send it (not normalised).
     pub sender: String,
+    /// The event's BCS bytes.
     pub bcs: Vec<u8>,
+    /// The node's JSON rendering of the event.
     pub json: Value,
+    /// The checkpoint the transaction was in.
     pub checkpoint: u64,
+    /// The transaction digest (unique per fixture).
     pub transaction_digest: String,
+    /// The event's position within its transaction.
     pub event_index: u32,
     /// What the row's columns must be.
     pub kind: &'static str,
+    /// The gate the event concerns, if its kind has one.
     pub gate_id: Option<String>,
+    /// The commission an `AccessMinted` event paid.
     pub commission_mist: Option<i64>,
 }
 
@@ -75,6 +88,7 @@ impl Fixture {
 pub struct Bcs(pub Vec<u8>);
 
 impl Bcs {
+    /// Append a 32-byte address.
     pub fn address(mut self, a: &str) -> Self {
         let hex = addr(a);
         for i in 0..32 {
@@ -82,14 +96,17 @@ impl Bcs {
         }
         self
     }
+    /// Append a boolean as one byte.
     pub fn bool(mut self, b: bool) -> Self {
         self.0.push(u8::from(b));
         self
     }
+    /// Append a `u64` in little-endian order.
     pub fn u64(mut self, v: u64) -> Self {
         self.0.extend_from_slice(&v.to_le_bytes());
         self
     }
+    /// Append a ULEB128 unsigned integer (BCS lengths and enum tags).
     pub fn uleb(mut self, mut v: u64) -> Self {
         loop {
             let byte = (v & 0x7f) as u8;
@@ -101,18 +118,22 @@ impl Bcs {
             self.0.push(byte | 0x80);
         }
     }
+    /// Append a length-prefixed byte string.
     pub fn bytes(self, b: &[u8]) -> Self {
         let mut s = self.uleb(b.len() as u64);
         s.0.extend_from_slice(b);
         s
     }
+    /// Append a length-prefixed UTF-8 string.
     pub fn string(self, s: &str) -> Self {
         self.bytes(s.as_bytes())
     }
 }
 
+/// The counter behind the generated transaction digests, shared by all fixtures in the process.
 static SEQ: AtomicU64 = AtomicU64::new(0);
 
+/// The next unique transaction digest (`tx1`, `tx2`, ...).
 fn next_digest() -> String {
     format!("tx{}", SEQ.fetch_add(1, Ordering::Relaxed) + 1)
 }
@@ -120,6 +141,7 @@ fn next_digest() -> String {
 /// `AccessMintedEvent` for `gate` (commission default 2000 in the TypeScript fixtures).
 pub fn minted(gate: &str, checkpoint: u64, commission: u64) -> Fixture {
     let bcs =
+        // The BCS layout of the Move event: nft id, gate id, soulbound flag, uses, recipient, commission and timestamp, in declaration order.
         Bcs::default().address(&nft()).address(gate).bool(false).u64(3).address(&alice()).u64(commission).u64(1).0;
     Fixture {
         event_type: format!("{}::access_gate::AccessMintedEvent", ag()),
@@ -134,13 +156,16 @@ pub fn minted(gate: &str, checkpoint: u64, commission: u64) -> Fixture {
         event_index: 0,
         kind: "AccessMinted",
         gate_id: Some(addr(gate)),
+        // The row stores the commission as a signed 63-bit value; a fixture that does not fit is a bug in the test.
         commission_mist: Some(i64::try_from(commission).expect("fixture commission fits 63 bits")),
     }
 }
 
 /// `AccessConsumedEvent` for `gate`.
 pub fn consumed(gate: &str, checkpoint: u64) -> Fixture {
+    // Consumption carries the one-time nonce as a length-prefixed byte string.
     let bcs = Bcs::default().address(&nft()).address(gate).bytes(b"nonce-123").address(&alice()).u64(2).u64(2).0;
+    // The node renders a byte vector as a JSON array of numbers.
     let nonce: Vec<Value> = b"nonce-123".iter().map(|b| json!(*b)).collect();
     Fixture {
         event_type: format!("{}::access_gate::AccessConsumedEvent", ag()),
@@ -161,6 +186,7 @@ pub fn consumed(gate: &str, checkpoint: u64) -> Fixture {
 
 /// `PlatformConfigUpdatedEvent` (concerns no gate).
 pub fn platform_updated(checkpoint: u64) -> Fixture {
+    // Platform settings: treasury, commission in basis points, minimum commission and free-gate fee.
     let bcs = Bcs::default().address(&alice()).u64(20).u64(500_000).u64(1_000_000_000).0;
     Fixture {
         event_type: format!("{}::access_gate::PlatformConfigUpdatedEvent", ag()),
@@ -173,7 +199,9 @@ pub fn platform_updated(checkpoint: u64) -> Fixture {
         checkpoint,
         transaction_digest: next_digest(),
         event_index: 0,
+        // The kind the ingester must derive from the event type.
         kind: "PlatformConfigUpdated",
+        // Platform-wide events belong to no gate.
         gate_id: None,
         commission_mist: None,
     }
@@ -182,6 +210,7 @@ pub fn platform_updated(checkpoint: u64) -> Fixture {
 /// `SealedContentPublished` for `gate`.
 pub fn sealed(gate: &str, checkpoint: u64, label: &str) -> Fixture {
     let bcs =
+        // Sealed content: content id, gate, blob id, seal id, label and publisher.
         Bcs::default().address(&nft()).address(gate).string("blob").string("seal").string(label).address(&alice()).0;
     Fixture {
         event_type: format!("{}::sealed_content::SealedContentPublished", seal()),

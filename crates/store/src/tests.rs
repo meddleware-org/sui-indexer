@@ -6,13 +6,17 @@ use crate::migrate::{self, MIGRATIONS};
 use crate::require_db;
 use crate::sui::normalize_sui_address;
 
+/// A short address in its long form.
 fn addr(s: &str) -> String {
     normalize_sui_address(s)
 }
 
+/// The fixtures' `access_gate` package.
 const AG: &str = "0xa1";
+/// The fixtures' sealed-storage package.
 const SEAL: &str = "0x5e";
 
+/// A stored event of a kind, for a gate, at a checkpoint, with an optional commission.
 pub(crate) fn ev(kind: &str, gate: &str, checkpoint: u64, commission: Option<i64>, tx: &str) -> IndexedEvent {
     let module = if kind == "SealedContentPublished" { "sealed_content" } else { "access_gate" };
     let pkg = if kind == "SealedContentPublished" { SEAL } else { AG };
@@ -30,24 +34,29 @@ pub(crate) fn ev(kind: &str, gate: &str, checkpoint: u64, commission: Option<i64
     }
 }
 
+/// An `AccessMinted` event with a commission.
 pub(crate) fn minted(gate: &str, checkpoint: u64, commission: i64, tx: &str) -> IndexedEvent {
     ev("AccessMinted", gate, checkpoint, Some(commission), tx)
 }
 
+/// The fixtures' packages bound for both streams.
 fn bound() -> Vec<(Stream, String)> {
     vec![(Stream::AccessGate, addr(AG)), (Stream::SealedContent, addr(SEAL))]
 }
 
+/// A different package binding, to provoke a package change.
 fn other() -> Vec<(Stream, String)> {
     vec![(Stream::AccessGate, format!("0x{}", "77".repeat(32))), (Stream::SealedContent, addr(SEAL))]
 }
 
+/// The checkpoints of a page's rows.
 fn checkpoints(p: &Page) -> Vec<String> {
     p.rows.iter().map(|r| r.checkpoint.clone().unwrap()).collect()
 }
 
 // ── Ingest and pages ────────────────────────────────────────────────────────
 
+/// Re ingesting the same events is a no op.
 #[tokio::test]
 async fn re_ingesting_the_same_events_is_a_no_op() {
     let db = require_db!();
@@ -58,6 +67,7 @@ async fn re_ingesting_the_same_events_is_a_no_op() {
     assert!(s.verify_counters().await.unwrap().is_empty());
 }
 
+/// A null cursor keeps the stored position.
 #[tokio::test]
 async fn a_null_cursor_keeps_the_stored_position() {
     let db = require_db!();
@@ -67,6 +77,7 @@ async fn a_null_cursor_keeps_the_stored_position() {
     assert_eq!(s.cursor(Stream::AccessGate).await.unwrap().as_deref(), Some("kept"));
 }
 
+/// Stored rows are served verbatim newest first.
 #[tokio::test]
 async fn stored_rows_are_served_verbatim_newest_first() {
     let db = require_db!();
@@ -89,6 +100,7 @@ async fn stored_rows_are_served_verbatim_newest_first() {
     assert_eq!(s.head_id(Stream::SealedContent).await.unwrap(), 0);
 }
 
+/// Pages filter by kind and gate.
 #[tokio::test]
 async fn pages_filter_by_kind_and_gate() {
     let db = require_db!();
@@ -157,6 +169,7 @@ async fn ids_are_ordered_not_gapless_and_nothing_depends_on_contiguity() {
     assert!(s.verify_counters().await.unwrap().is_empty());
 }
 
+/// The column types and constraints refuse what the code never writes.
 #[tokio::test]
 async fn the_column_types_and_constraints_refuse_what_the_code_never_writes() {
     let db = require_db!();
@@ -186,6 +199,7 @@ async fn the_column_types_and_constraints_refuse_what_the_code_never_writes() {
 
 // ── bindPackages ────────────────────────────────────────────────────────────
 
+/// Records the packages of a fresh index without clearing anything.
 #[tokio::test]
 async fn records_the_packages_of_a_fresh_index_without_clearing_anything() {
     let db = require_db!();
@@ -195,6 +209,7 @@ async fn records_the_packages_of_a_fresh_index_without_clearing_anything() {
     assert_eq!(s.generation(), g);
 }
 
+/// Keeps an index whose packages are unchanged.
 #[tokio::test]
 async fn keeps_an_index_whose_packages_are_unchanged() {
     let db = require_db!();
@@ -208,6 +223,7 @@ async fn keeps_an_index_whose_packages_are_unchanged() {
     assert_eq!(s.generation(), g);
 }
 
+/// Refuses to clear history without confirmation and changes nothing.
 #[tokio::test]
 async fn refuses_to_clear_history_without_confirmation_and_changes_nothing() {
     let db = require_db!();
@@ -228,6 +244,7 @@ async fn refuses_to_clear_history_without_confirmation_and_changes_nothing() {
     assert!(matches!(s.bind_packages(&other(), &[], None).await, Err(BindError::PackageChanged(_))));
 }
 
+/// Clears only the confirmed stream and rotates the generation.
 #[tokio::test]
 async fn clears_only_the_confirmed_stream_and_rotates_the_generation() {
     let db = require_db!();
@@ -249,6 +266,7 @@ async fn clears_only_the_confirmed_stream_and_rotates_the_generation() {
     assert!(s.verify_counters().await.unwrap().is_empty());
 }
 
+/// Treats rows indexed before packages were recorded like a package change.
 #[tokio::test]
 async fn treats_rows_indexed_before_packages_were_recorded_like_a_package_change() {
     let db = require_db!();
@@ -259,6 +277,7 @@ async fn treats_rows_indexed_before_packages_were_recorded_like_a_package_change
     assert_eq!(s.coverage(Stream::AccessGate).await.unwrap().events, 0);
 }
 
+/// Copies the index into a backup schema before clearing and the copy restores.
 #[tokio::test]
 async fn copies_the_index_into_a_backup_schema_before_clearing_and_the_copy_restores() {
     let db = require_db!();
@@ -287,6 +306,7 @@ async fn copies_the_index_into_a_backup_schema_before_clearing_and_the_copy_rest
     assert_eq!(err.code().map(|c| c.code()), Some("42501"));
 }
 
+/// The backup and the clearing are one transaction.
 #[tokio::test]
 async fn the_backup_and_the_clearing_are_one_transaction() {
     let db = require_db!();
@@ -310,6 +330,7 @@ async fn the_backup_and_the_clearing_are_one_transaction() {
 
 // ── Counters ────────────────────────────────────────────────────────────────
 
+/// Counters stay exact across duplicates and agree with a recount.
 #[tokio::test]
 async fn counters_stay_exact_across_duplicates_and_agree_with_a_recount() {
     let db = require_db!();
@@ -338,6 +359,7 @@ async fn counters_stay_exact_across_duplicates_and_agree_with_a_recount() {
     assert!(s.verify_counters().await.unwrap().is_empty());
 }
 
+/// Commission totals are exact beyond 64 bits.
 #[tokio::test]
 async fn commission_totals_are_exact_beyond_64_bits() {
     let db = require_db!();
@@ -364,6 +386,7 @@ async fn a_recount_detects_counters_that_do_not_match_the_rows() {
     assert_eq!(diffs.len(), 3, "{diffs:?}");
 }
 
+/// Coverage over 50k rows is a constant time read.
 #[tokio::test]
 async fn coverage_over_50k_rows_is_a_constant_time_read() {
     let db = require_db!();
@@ -393,6 +416,7 @@ async fn coverage_over_50k_rows_is_a_constant_time_read() {
     assert!(!plan.contains("events on") && !plan.contains("Seq Scan on events"), "{plan}");
 }
 
+/// Undecodable and gap counters.
 #[tokio::test]
 async fn undecodable_and_gap_counters() {
     let db = require_db!();
@@ -409,6 +433,7 @@ async fn undecodable_and_gap_counters() {
     assert_eq!(s.health(Stream::SealedContent).await.unwrap(), StreamHealth { undecodable: 0, gaps: 0 });
 }
 
+/// Heartbeats round trip.
 #[tokio::test]
 async fn heartbeats_round_trip() {
     let db = require_db!();
@@ -429,6 +454,7 @@ async fn heartbeats_round_trip() {
 
 // ── Single writer and migrations ────────────────────────────────────────────
 
+/// A second writer is refused while the first lives and admitted after.
 #[tokio::test]
 async fn a_second_writer_is_refused_while_the_first_lives_and_admitted_after() {
     let db = require_db!();
@@ -445,6 +471,7 @@ async fn a_second_writer_is_refused_while_the_first_lives_and_admitted_after() {
     assert!(!again.is_closed());
 }
 
+/// The writer lock is visible as an advisory lock of the owner session.
 #[tokio::test]
 async fn the_writer_lock_is_visible_as_an_advisory_lock_of_the_owner_session() {
     let db = require_db!();
@@ -464,6 +491,7 @@ async fn the_writer_lock_is_visible_as_an_advisory_lock_of_the_owner_session() {
     assert!(!s.is_closed());
 }
 
+/// Migrations apply once and restarts do not reapply.
 #[tokio::test]
 async fn migrations_apply_once_and_restarts_do_not_reapply() {
     let db = require_db!();
@@ -490,6 +518,7 @@ async fn migrations_apply_once_and_restarts_do_not_reapply() {
     assert_eq!(again.meta(SCHEMA_WRITER_KEY).await.unwrap().as_deref(), Some("postgres"));
 }
 
+/// Two migrators racing on an empty database apply each migration once.
 #[tokio::test]
 async fn two_migrators_racing_on_an_empty_database_apply_each_migration_once() {
     let db = require_db!();
@@ -504,6 +533,7 @@ async fn two_migrators_racing_on_an_empty_database_apply_each_migration_once() {
     );
 }
 
+/// A migration applied from different sql is refused.
 #[tokio::test]
 async fn a_migration_applied_from_different_sql_is_refused() {
     let db = require_db!();
@@ -517,6 +547,7 @@ async fn a_migration_applied_from_different_sql_is_refused() {
     assert!(matches!(err, StoreError::Migration(_)) && err.to_string().contains("different SQL"), "{err}");
 }
 
+/// A schema newer than the build is refused by the ingester and served by the api.
 #[tokio::test]
 async fn a_schema_newer_than_the_build_is_refused_by_the_ingester_and_served_by_the_api() {
     let db = require_db!();
@@ -535,6 +566,7 @@ async fn a_schema_newer_than_the_build_is_refused_by_the_ingester_and_served_by_
     db.reader(1).check().await.expect("ready");
 }
 
+/// A failed migration leaves nothing behind.
 #[tokio::test]
 async fn a_failed_migration_leaves_nothing_behind() {
     let db = require_db!();
@@ -548,6 +580,7 @@ async fn a_failed_migration_leaves_nothing_behind() {
 
 // ── The API's reader: readiness, read-only, one statement per request, pool ─
 
+/// The reader is not ready until the writer has migrated and started.
 #[tokio::test]
 async fn the_reader_is_not_ready_until_the_writer_has_migrated_and_started() {
     let db = require_db!();
@@ -573,6 +606,7 @@ async fn the_reader_is_not_ready_until_the_writer_has_migrated_and_started() {
     assert_eq!(r.generation().await.unwrap().as_deref(), Some(s.generation()));
 }
 
+/// The reader cannot write cannot change the schema and sees new commits.
 #[tokio::test]
 async fn the_reader_cannot_write_cannot_change_the_schema_and_sees_new_commits() {
     let db = require_db!();
@@ -611,6 +645,7 @@ async fn the_reader_cannot_write_cannot_change_the_schema_and_sees_new_commits()
     assert_eq!(r.polls().await.unwrap()[0].last_success_at, 7);
 }
 
+/// Pooled connections start read only and never use a generic plan.
 #[tokio::test]
 async fn pooled_connections_start_read_only_and_never_use_a_generic_plan() {
     let db = require_db!();
@@ -720,6 +755,7 @@ async fn the_events_statement_equals_the_separate_reads() {
     assert_eq!((none.stats.counts.len(), none.stats.commission_mist), (0, 0));
 }
 
+/// A cancelled request leaves the pool usable.
 #[tokio::test]
 async fn a_cancelled_request_leaves_the_pool_usable() {
     let db = require_db!();
@@ -741,6 +777,7 @@ async fn a_cancelled_request_leaves_the_pool_usable() {
     assert_eq!(r.query_for_test("SELECT (pg_current_xact_id_if_assigned() IS NULL)::text").await, "true");
 }
 
+/// An unreachable database is unavailable not a panic.
 #[tokio::test]
 async fn an_unreachable_database_is_unavailable_not_a_panic() {
     let Some(admin) = crate::testdb::admin_settings() else { return };
@@ -754,6 +791,7 @@ async fn an_unreachable_database_is_unavailable_not_a_panic() {
 
 // ── Roles and TLS ──────────────────────────────────────────────────────────
 
+/// A role cannot connect to another services database.
 #[tokio::test]
 async fn a_role_cannot_connect_to_another_services_database() {
     let db = require_db!();
@@ -774,6 +812,7 @@ async fn a_role_cannot_connect_to_another_services_database() {
     }
 }
 
+/// The owner can migrate and the api role cannot.
 #[tokio::test]
 async fn the_owner_can_migrate_and_the_api_role_cannot() {
     let db = require_db!();
@@ -786,6 +825,7 @@ async fn the_owner_can_migrate_and_the_api_role_cannot() {
     assert!(migrate::run(&mut db.owner.connect().await.unwrap()).await.is_ok());
 }
 
+/// Tls is verified against the given ca when the server offers it.
 #[tokio::test]
 async fn tls_is_verified_against_the_given_ca_when_the_server_offers_it() {
     let Some(admin) = crate::testdb::admin_settings() else { return };

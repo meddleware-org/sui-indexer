@@ -1,3 +1,4 @@
+# The read API crate: the `api` binary and the library its tests use. Versions are pinned exactly (`=`), so a dependency change is a reviewed edit.
 [package]
 name = "sui-indexer-api"
 description = "sui-indexer API: SELECT-only PostgreSQL role, cacheable GET pages over hyper."
@@ -8,28 +9,35 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+# Use the workspace lint set (unsafe code and missing docs are denied).
 [lints]
 workspace = true
 
+# The binary is called `api`, whatever the crate is named.
 [[bin]]
 name = "api"
 path = "src/main.rs"
 
 [dependencies]
+# The store crate: configuration, the read queries and the pool.
 sui-indexer-store = { path = "../store" }
 # HTTP/1.1 server without a web framework: hyper + hyper-util (timeouts, graceful shutdown).
 hyper = { version = "=1.12.0", features = ["http1", "server"] }
 hyper-util = { version = "=0.1.21", features = ["tokio", "server", "server-graceful", "http1"] }
+# Body types, byte buffers and the runtime: the minimum the server needs.
 http-body-util = "=0.1.5"
 bytes = "=1.12.1"
 tokio = { version = "=1.54.1", features = ["rt-multi-thread", "macros", "net", "time", "signal", "sync"] }
+# JSON for the response bodies and base64 for the BCS bytes in them.
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.154"
 base64 = "=0.23.1"
 
+# Used by the tests only: a real database harness, fixtures and a property-test library.
 [dev-dependencies]
 sui-indexer-store = { path = "../store", features = ["testing"] }
 tokio = { version = "=1.54.1", features = ["rt-multi-thread", "macros", "net", "time", "signal", "io-util", "sync"] }
+# The fixtures the handler tests seed the database with.
 sui-indexer-testkit = { path = "../testkit" }
 proptest = { version = "=1.12.0", default-features = false, features = ["std"] }
 hyper = { version = "=1.12.0", features = ["http1", "server", "client"] }

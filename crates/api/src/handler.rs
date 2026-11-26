@@ -36,7 +36,9 @@ pub const NOT_READY: &str = "index not created yet";
 /// What a client sees while the database cannot be reached (the cause is logged, not sent).
 pub const UNAVAILABLE: &str = "database unavailable";
 
+/// One request as the transport hands it over: only the parts the handler reads, so the handler is tested without a socket.
 pub struct ApiRequest<'a> {
+    /// The HTTP method, upper case (`GET`, `HEAD`, `OPTIONS`; anything else is refused with 405).
     pub method: &'a str,
     /// The request target's path (as the transport parsed it).
     pub path: &'a str,
@@ -50,14 +52,19 @@ pub struct ApiRequest<'a> {
     pub remote_address: Option<&'a str>,
 }
 
+/// One answer: a status, its headers and a body (empty for HEAD, 204 and 304).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApiResponse {
+    /// The HTTP status code.
     pub status: u16,
+    /// The response headers, in the order they are sent.
     pub headers: Vec<(&'static str, String)>,
+    /// The response body; empty for HEAD, 204, 301 and 304.
     pub body: String,
 }
 
 impl ApiResponse {
+    /// The value of a response header, matched case-insensitively (header names are, in HTTP).
     pub fn header(&self, name: &str) -> Option<&str> {
         self.headers.iter().find(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v.as_str())
     }
@@ -67,12 +74,14 @@ impl ApiResponse {
 /// the API answers `503` (and `/readyz` keeps the pod out of the Service), and the same while the database
 /// is unreachable; nothing here ever writes or migrates.
 pub struct Db {
+    /// The pool over the read-only role.
     reader: Reader,
     /// Epoch ms of the last "database unavailable" log line (one per 10 s, not one per request).
     last_logged: AtomicI64,
 }
 
 impl Db {
+    /// Wrap the read-only reader; nothing is queried until the first request.
     pub fn new(reader: Reader) -> Db {
         Db { reader, last_logged: AtomicI64::new(0) }
     }
@@ -113,34 +122,46 @@ impl Db {
     }
 }
 
+/// Everything a request needs besides the request itself: the database, the served network, the rate limiter, the poll interval and a clock.
 pub struct ApiContext {
+    /// The read-only database.
     pub db: Db,
+    /// The network this indexer serves (`testnet` or `mainnet`); the first path segment after `v1` must equal it.
     pub network: String,
+    /// The per-client rate limiter, behind a lock because requests run concurrently.
     pub limiter: Mutex<RateLimiter>,
+    /// The ingester poll interval in milliseconds; a stream is healthy if it polled within five of these.
     pub poll_ms: u64,
+    /// The clock, as epoch milliseconds; a function so tests can fix the time.
     pub now: fn() -> i64,
 }
 
 /// An error answered as `{ "error": message }`; status 500 is logged and answered generically.
 #[derive(Debug)]
 pub struct HttpError {
+    /// The HTTP status to answer with.
     pub status: u16,
+    /// The message sent as the error body (for a 500, the detail that is logged instead).
     pub message: String,
 }
 
 impl HttpError {
+    /// An error answered with this status and message.
     pub fn new(status: u16, message: impl Into<String>) -> HttpError {
         HttpError { status, message: message.into() }
     }
+    /// An internal failure: logged with its detail, answered as a generic 500.
     fn internal(message: String) -> HttpError {
         HttpError { status: 500, message }
     }
 }
 
+/// The headers every answer carries: open CORS (the API is public and read-only) and no content sniffing.
 fn base_headers() -> Vec<(&'static str, String)> {
     vec![("Access-Control-Allow-Origin", "*".into()), ("X-Content-Type-Options", "nosniff".into())]
 }
 
+/// A JSON answer with the base headers, the content type and any extra headers (cache policy, ETag).
 fn json(status: u16, body: &impl Serialize, extra: Vec<(&'static str, String)>) -> ApiResponse {
     let mut headers = base_headers();
     headers.push(("Content-Type", "application/json; charset=utf-8".into()));
@@ -148,16 +169,20 @@ fn json(status: u16, body: &impl Serialize, extra: Vec<(&'static str, String)>) 
     ApiResponse { status, headers, body: serde_json::to_string(body).expect("response serialises") }
 }
 
+/// The JSON shape of an error answer: an object with one `error` field.
 #[derive(Serialize)]
 struct ErrorBody<'a> {
+    /// The error message.
     error: &'a str,
 }
 
+/// The answer for an error: a 404 may be cached for a minute (the path will not appear), every other error is not stored.
 fn error_response(e: &HttpError) -> ApiResponse {
     let cache = if e.status == 404 { "public, max-age=60" } else { "no-store" };
     json(e.status, &ErrorBody { error: &e.message }, vec![("Cache-Control", cache.into())])
 }
 
+/// Refuse a query parameter the route does not take, so a misspelt filter is a 400 and not silently ignored.
 fn only_params(q: &Params, allowed: &[&str]) -> Result<(), HttpError> {
     match q.keys().find(|k| !allowed.contains(k)) {
         Some(k) => Err(HttpError::new(400, format!("unknown query parameter: {k}"))),
@@ -165,6 +190,7 @@ fn only_params(q: &Params, allowed: &[&str]) -> Result<(), HttpError> {
     }
 }
 
+/// Parse the page size: an integer in `[1, max]`, or the default when absent.
 fn parse_limit(raw: Option<&str>, fallback: u32, max: u32) -> Result<u32, HttpError> {
     let Some(raw) = raw else { return Ok(fallback) };
     if !is_limit_syntax(raw) {
@@ -177,6 +203,7 @@ fn parse_limit(raw: Option<&str>, fallback: u32, max: u32) -> Result<u32, HttpEr
     Ok(v)
 }
 
+/// Parse an optional `0x` hex id and normalise it to the canonical long form the database stores.
 fn parse_id(raw: Option<&str>, what: &str) -> Result<Option<String>, HttpError> {
     let Some(raw) = raw else { return Ok(None) };
     if !is_hex_id(raw) {
@@ -209,17 +236,25 @@ fn check_generation(cursor: &Option<(String, i64)>, generation: &str) -> Result<
     }
 }
 
+/// One event as the API serves it: the same camelCase shape the client library reads, with the BCS bytes in base64.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct EventJson<'a> {
+    /// The fully qualified Move event type.
     event_type: &'a str,
+    /// The Sui address that emitted the event.
     sender: &'a str,
+    /// The event's BCS bytes, base64-encoded.
     bcs: String,
+    /// The checkpoint the event was in, as a decimal string, if known.
     checkpoint: &'a Option<String>,
+    /// The digest of the transaction that emitted the event.
     transaction_digest: &'a str,
+    /// The event's position within its transaction.
     event_index: i64,
 }
 
+/// Convert a stored row to its served shape (the bytes are encoded, nothing is reinterpreted).
 fn serialize_row(row: &EventRow) -> EventJson<'_> {
     EventJson {
         event_type: &row.event_type,
@@ -231,17 +266,23 @@ fn serialize_row(row: &EventRow) -> EventJson<'_> {
     }
 }
 
+/// One page of events: the rows, the cursor for the next older page and, on the head page only, how fresh the index is.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct EventsPage<'a> {
+    /// The events of this page, newest first.
     events: Vec<EventJson<'a>>,
+    /// The cursor to pass as `before` for the next older page, or null at the end.
     cursor: Option<String>,
+    /// The first checkpoint the index covers, so a client knows how far back it can read.
     #[serde(skip_serializing_if = "Option::is_none")]
     indexed_from_checkpoint: Option<String>,
+    /// Head page only: the latest checkpoint indexed (null when none yet).
     // Only the head page says how fresh the index is (older pages are immutable and cached for a
     // year): a client treats a head page whose `polledAt` is old as unavailable and falls back.
     #[serde(skip_serializing_if = "Option::is_none")]
     latest_checkpoint: Option<Option<String>>,
+    /// Head page only: when the ingester last polled successfully, in epoch milliseconds (null when it never has).
     #[serde(skip_serializing_if = "Option::is_none")]
     polled_at: Option<Option<i64>>,
 }
@@ -319,61 +360,92 @@ async fn events_route(
     Ok(events_response(req, before_id, snap))
 }
 
+/// What one stream has indexed: the first and latest checkpoint, the event count and the counts of undecodable events and gaps.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct StreamCoverage {
+    /// The first checkpoint indexed for this stream.
     from_checkpoint: Option<String>,
+    /// The latest checkpoint indexed for this stream.
     latest_checkpoint: Option<String>,
+    /// How many events the stream holds.
     events: i64,
+    /// How many events could not be decoded (kept as raw bytes and counted, never dropped).
     undecodable: i64,
+    /// How many gaps the stream has, where the source could not supply a range.
     gaps: i64,
 }
 
+/// The JSON body of the coverage route: the network, the index generation and both streams.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CoverageBody<'a> {
+    /// The network served.
     network: &'a str,
+    /// The index generation; a cursor from another generation is refused.
     generation: &'a str,
+    /// Coverage of the access-gate stream.
     access_gate: StreamCoverage,
+    /// Coverage of the sealed-content stream.
     sealed_content: StreamCoverage,
 }
 
+/// The JSON body of a gate statistics route: counts by kind and the commission total as a decimal string (it can exceed 53 bits).
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct StatsBody {
+    /// The gate id, normalised.
     gate_id: String,
+    /// How many access NFTs were minted.
     minted: i64,
+    /// How many were consumed.
     consumed: i64,
+    /// How many were burned.
     burned: i64,
+    /// The commission total in MIST as a decimal string, because it can exceed 53 bits.
     commission_mist: String,
+    /// The first checkpoint the index covers.
     indexed_from_checkpoint: Option<String>,
 }
 
+/// One stream health: whether its last poll is recent, how old that poll is and the last error text.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct StreamHealthJson {
+    /// Whether the last poll is within five poll intervals.
     ok: bool,
+    /// The age of the last successful poll in milliseconds (null if never).
     last_poll_age_ms: Option<i64>,
+    /// The last error the ingester recorded for this stream.
     last_error: Option<String>,
 }
 
+/// Both streams health, under the names the client uses.
 #[derive(Serialize)]
 struct Streams {
+    /// The access-gate stream.
     #[serde(rename = "access-gate")]
     access_gate: StreamHealthJson,
+    /// The sealed-content stream.
     #[serde(rename = "sealed-content")]
     sealed_content: StreamHealthJson,
 }
 
+/// The JSON body of the health route: overall health and each stream.
 #[derive(Serialize)]
 struct HealthBody {
+    /// Whether every stream is healthy.
     ok: bool,
+    /// Each stream's health.
     streams: Streams,
 }
 
+/// The JSON body of the readiness route: whether the database answers and, if not, why in a fixed phrase.
 #[derive(Serialize)]
 struct ReadyBody<'a> {
+    /// Whether the database answers.
     ok: bool,
+    /// The reason when it does not, from a fixed set of phrases (never a database message).
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<&'a str>,
 }
@@ -422,6 +494,7 @@ pub async fn metrics(ctx: &ApiContext) -> ApiResponse {
     }
 }
 
+/// The health answer: 200 only if both streams have polled successfully within five poll intervals, else 503 naming the stream and its error.
 async fn healthz(ctx: &ApiContext) -> ApiResponse {
     let now = (ctx.now)();
     let limit = i64::try_from(ctx.poll_ms.saturating_mul(5)).unwrap_or(i64::MAX);
@@ -441,7 +514,9 @@ async fn healthz(ctx: &ApiContext) -> ApiResponse {
     json(if ok { 200 } else { 503 }, &HealthBody { ok, streams }, vec![("Cache-Control", "no-store".into())])
 }
 
+/// Dispatch one validated GET or HEAD to its handler by path: readiness, health, coverage, the two event streams and gate statistics.
 async fn route(ctx: &ApiContext, req: &ApiRequest<'_>, pathname: &str, q: &Params) -> Result<ApiResponse, HttpError> {
+    // Split into non-empty segments, so a doubled or trailing slash cannot change which route matches.
     let parts: Vec<&str> = pathname.split('/').filter(|s| !s.is_empty()).collect();
 
     if parts == ["readyz"] {
@@ -463,18 +538,22 @@ async fn route(ctx: &ApiContext, req: &ApiRequest<'_>, pathname: &str, q: &Param
         return Ok(healthz(ctx).await);
     }
 
+    // Every data route is /v1/<network>/...; anything else is unknown.
     if parts.len() < 3 || parts[0] != "v1" {
         return Err(HttpError::new(404, "not found"));
     }
+    // One indexer serves one network, and says so rather than answering for another.
     if parts[1] != ctx.network {
         return Err(HttpError::new(404, format!("this indexer serves {} only", ctx.network)));
     }
+    // The route below the network, for the exact-match checks that follow.
     let rest = parts[2..].join("/");
 
     if rest == "coverage" {
         only_params(q, &[])?;
         ctx.db.ensure_ready().await?;
         let snap = ctx.db.reader().coverage().await.map_err(|e| ctx.db.http(e))?;
+        // The snapshot carries both streams in a fixed order; the two destructured here are the access-gate and sealed-content streams.
         let [(_, ag_cov, ag_health), (_, sc_cov, sc_health)] = snap.streams;
         let cov = |c: sui_indexer_store::Coverage, h: sui_indexer_store::StreamHealth| StreamCoverage {
             from_checkpoint: c.from_checkpoint,
@@ -495,6 +574,7 @@ async fn route(ctx: &ApiContext, req: &ApiRequest<'_>, pathname: &str, q: &Param
 
     if rest == "access-gate/events" {
         only_params(q, &["kinds", "gate", "before", "limit"])?;
+        // `kinds` is an optional comma list of event kinds; an unknown or empty list is a 400 naming what was wrong.
         let kinds = match q.get("kinds") {
             None => None,
             Some(raw) => {
@@ -555,10 +635,12 @@ pub async fn handle(ctx: &ApiContext, req: &ApiRequest<'_>) -> Result<ApiRespons
     let pathname =
         if req.path.starts_with('/') { normalize_path(req.path) } else { normalize_path(&format!("/{}", req.path)) };
     let q = Params::parse(req.query.unwrap_or(""));
+    // Probes are never rate limited or redirected: the cluster and the monitoring stack must always get an answer.
     let exempt = pathname == "/healthz" || pathname == "/readyz";
     if !exempt {
         let client = client_key(req.cf_connecting_ip.or(req.remote_address).unwrap_or("unknown"));
         let now = (ctx.now)();
+        // A poisoned lock still holds a usable limiter, so a panic elsewhere does not take rate limiting down.
         let mut limiter = ctx.limiter.lock().unwrap_or_else(|e| e.into_inner());
         if !limiter.take(&client, now) {
             let retry = limiter.retry_after(&client).max(1);
@@ -582,11 +664,13 @@ pub async fn handle(ctx: &ApiContext, req: &ApiRequest<'_>) -> Result<ApiRespons
             return Ok(ApiResponse { status: 301, headers, body: String::new() });
         }
     }
+    // A 500 is returned to the caller to log; every other error becomes its JSON answer.
     let res = match route(ctx, req, &pathname, &q).await {
         Ok(r) => r,
         Err(e) if e.status == 500 => return Err(e.message),
         Err(e) => error_response(&e),
     };
+    // HEAD gets the same status and headers as GET with no body.
     Ok(if req.method == "HEAD" { ApiResponse { body: String::new(), ..res } } else { res })
 }
 

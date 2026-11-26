@@ -50,6 +50,7 @@ if [ "$total" -eq 0 ]; then
   echo "${sbom}: the dependency graph lists no crates" >&2
   exit 1
 fi
+# Crates in the dependency graph that the SBOM does not list.
 missing="$(comm -23 <(echo "$expected") <(echo "$listed"))"
 if [ -n "$missing" ]; then
   echo "${sbom}: missing $(grep -c . <<< "$missing") of ${total} crates: $(tr '\n' ' ' <<< "$missing")" >&2

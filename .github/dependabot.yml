@@ -1,12 +1,18 @@
+# Dependabot: weekly, grouped update pull requests for the Cargo crates, the CI-only contract tests, the Docker base images and the GitHub Actions (the fleet policy, D41 and D52, in the workspace docs/audit/LENS_GROUNDING_LOG.md).
+# Minor and patch updates are merged when CI is green; crate versions are pinned exactly, so each update is a reviewed change to Cargo.toml.
 version: 2
 updates:
+  # The workspace crates (Cargo.lock and the exact pins in each Cargo.toml).
   - package-ecosystem: cargo
     directory: /
     schedule:
       interval: weekly
+    # Five open at a time keeps the queue reviewable.
     open-pull-requests-limit: 5
     groups:
+      # One pull request for all minor and patch updates.
       cargo-minor-patch:
+        # Major updates are reviewed by hand, never by a bot.
         update-types: [minor, patch]
   # The CI-only client-contract project (the published client packages; never shipped).
   - package-ecosystem: npm
@@ -17,6 +23,7 @@ updates:
     groups:
       contract-npm:
         patterns: ['*']
+  # The Dockerfile base images and their digest pins.
   - package-ecosystem: docker
     directory: /
     schedule:
@@ -25,6 +32,7 @@ updates:
     groups:
       docker:
         patterns: ['*']
+  # Actions are pinned by full commit SHA (D12); one pull request moves every pin together.
   - package-ecosystem: github-actions
     directory: /
     schedule:

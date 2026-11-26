@@ -13,7 +13,9 @@ fn percent_decode(input: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(input.len());
     let mut i = 0;
     while i < input.len() {
+        // A percent sign starts an escape only when two more bytes follow.
         if input[i] == b'%' && i + 2 < input.len() {
+            // Both bytes must be hex digits; otherwise the percent sign is literal (the URL Standard does not reject it).
             let hex = |b: u8| (b as char).to_digit(16);
             if let (Some(h), Some(l)) = (hex(input[i + 1]), hex(input[i + 2])) {
                 out.push((h * 16 + l) as u8);
@@ -21,6 +23,7 @@ fn percent_decode(input: &[u8]) -> Vec<u8> {
                 continue;
             }
         }
+        // Any other byte, and a percent sign that is not an escape, is copied unchanged.
         out.push(input[i]);
         i += 1;
     }
@@ -30,6 +33,7 @@ fn percent_decode(input: &[u8]) -> Vec<u8> {
 /// One name or value of `application/x-www-form-urlencoded`: `+` is a space, then percent-decoding,
 /// then UTF-8 decoding with replacement characters.
 fn form_decode(s: &str) -> String {
+    // Form encoding turns `+` into a space before percent-decoding, so `%2B` still decodes to a plus.
     let bytes: Vec<u8> = s.bytes().map(|b| if b == b'+' { b' ' } else { b }).collect();
     String::from_utf8_lossy(&percent_decode(&bytes)).into_owned()
 }
@@ -39,7 +43,9 @@ fn form_decode(s: &str) -> String {
 fn form_encode(s: &str, out: &mut String) {
     for b in s.bytes() {
         match b {
+            // The URL Standard's unreserved set for form encoding; everything else is escaped.
             b'*' | b'-' | b'.' | b'_' | b'0'..=b'9' | b'A'..=b'Z' | b'a'..=b'z' => out.push(b as char),
+            // A space is a plus in form encoding, not `%20`.
             b' ' => out.push('+'),
             _ => out.push_str(&format!("%{b:02X}")),
         }
@@ -52,9 +58,11 @@ impl Params {
         Params(
             query
                 .split('&')
+                // Empty pieces (`a=1&&b=2`) are dropped, as the URL Standard does.
                 .filter(|s| !s.is_empty())
                 .map(|s| match s.split_once('=') {
                     Some((k, v)) => (form_decode(k), form_decode(v)),
+                    // A name with no `=` has an empty value.
                     None => (form_decode(s), String::new()),
                 })
                 .collect(),
@@ -84,7 +92,9 @@ impl Params {
     pub fn set(&mut self, name: &str, value: String) {
         match self.0.iter().position(|(k, _)| k == name) {
             Some(i) => {
+                // The first occurrence takes the new value...
                 self.0[i].1 = value;
+                // ...and every later one is dropped, as `URLSearchParams.set` does.
                 let mut seen = 0;
                 self.0.retain(|(k, _)| {
                     if k != name {
@@ -94,10 +104,12 @@ impl Params {
                     seen == 1
                 });
             }
+            // A name that is absent is appended at the end.
             None => self.0.push((name.to_owned(), value)),
         }
     }
 
+    /// The parameter names in order of appearance (repeats included).
     pub fn keys(&self) -> impl Iterator<Item = &str> {
         self.0.iter().map(|(k, _)| k.as_str())
     }
@@ -115,6 +127,7 @@ fn utf16_cmp(a: &str, b: &str) -> std::cmp::Ordering {
 
 /// The distinct comma-separated items of `v`, in first-seen order (`[...new Set(v.split(','))]`).
 pub fn distinct_items(v: &str) -> Vec<String> {
+    // A vector with a linear membership test keeps first-seen order; the lists are at most a handful of kinds.
     let mut out: Vec<String> = Vec::new();
     for item in v.split(',') {
         if !out.iter().any(|o| o == item) {
@@ -129,12 +142,16 @@ pub fn distinct_items(v: &str) -> Vec<String> {
 /// query differs is answered with a cacheable 301 to this form, so the many spellings of one query
 /// share one cache entry instead of each being a separate miss that reaches the origin.
 pub fn canonical_query(q: &Params) -> Params {
+    // Rebuild the query in the client's order, replacing each value by its canonical form.
     let mut out = Params::default();
     for (k, v) in &q.0 {
+        // The gate id: any case and any length from 1 to 64 digits becomes the long lower-case form the database stores.
         let value = if k == "gate" && is_hex_id(v) {
             normalize_sui_address(v)
+        // The limit: leading zeros removed (`010` and `10` are one cache entry).
         } else if k == "limit" && is_limit_syntax(v) {
             v.parse::<u32>().expect("1-4 digits").to_string()
+        // The kinds list: sorted by UTF-16 order, as JavaScript's sort does, and de-duplicated, so the order a client wrote them in does not matter.
         } else if k == "kinds" {
             let mut items = distinct_items(v);
             items.sort_by(|a, b| utf16_cmp(a, b));
@@ -142,6 +159,7 @@ pub fn canonical_query(q: &Params) -> Params {
         } else {
             v.clone()
         };
+        // `set` also drops a repeated parameter after the first, so repeats cannot make separate cache entries.
         out.set(k, value);
     }
     out
@@ -149,6 +167,7 @@ pub fn canonical_query(q: &Params) -> Params {
 
 /// The path with a gate id in its canonical form (stats route), else unchanged.
 pub fn canonical_path(pathname: &str) -> String {
+    // Only the gate statistics route carries an id in its path.
     let segs: Vec<&str> = pathname.split('/').collect();
     // ["", "v1", <network>, "gates", <id>, "stats"]
     if segs.len() == 6
@@ -164,10 +183,12 @@ pub fn canonical_path(pathname: &str) -> String {
     pathname.to_owned()
 }
 
+/// Whether a path segment is a single dot, written plainly or percent-encoded (the URL Standard treats both alike).
 fn is_single_dot(s: &str) -> bool {
     s == "." || s.eq_ignore_ascii_case("%2e")
 }
 
+/// Whether a path segment is a double dot in any of its four percent-encoded spellings.
 fn is_double_dot(s: &str) -> bool {
     matches!(s.to_ascii_lowercase().as_str(), ".." | ".%2e" | "%2e." | "%2e%2e")
 }
@@ -175,33 +196,40 @@ fn is_double_dot(s: &str) -> bool {
 /// The pathname the URL Standard's parser produces for an absolute path: backslashes are slashes
 /// (special schemes) and `.`/`..` segments (also percent-encoded) are resolved.
 pub fn normalize_path(path: &str) -> String {
+    // The URL Standard treats a backslash as a slash in an http path.
     let path = path.replace('\\', "/");
+    // The path starts with a slash; skip the empty first piece.
     let segs: Vec<&str> = path.split('/').skip(1).collect();
     let mut out: Vec<&str> = Vec::new();
     let n = segs.len();
     for (i, seg) in segs.iter().enumerate() {
         let last = i + 1 == n;
+        // `..` removes the previous segment; as the last segment it leaves a trailing slash.
         if is_double_dot(seg) {
             out.pop();
             if last {
                 out.push("");
             }
+        // `.` is dropped; as the last segment it leaves a trailing slash.
         } else if is_single_dot(seg) {
             if last {
                 out.push("");
             }
         } else {
+            // An ordinary segment is kept as it is.
             out.push(seg);
         }
     }
     format!("/{}", out.join("/"))
 }
 
+/// Unit tests for query parsing and the canonical forms, with a property test that canonical paths are stable.
 #[cfg(test)]
 mod tests {
     use super::*;
     use proptest::prelude::*;
 
+    /// Parses like urlsearchparams.
     #[test]
     fn parses_like_urlsearchparams() {
         let p = Params::parse("a=1&&b&c=x+y%2Cz&d=%zz&=e&f=a=b");
@@ -209,37 +237,47 @@ mod tests {
             p.0,
             vec![
                 ("a".into(), "1".into()),
+                // A name with no value, a plus as a space, a percent-encoded comma and an invalid escape that stays literal.
                 ("b".into(), "".into()),
                 ("c".into(), "x y,z".into()),
                 ("d".into(), "%zz".into()),
+                // An empty name is kept: `=e` is a pair like any other.
                 ("".into(), "e".into()),
                 ("f".into(), "a=b".into()),
             ]
         );
+        // Serialising re-encodes with the form rules, so the output is the canonical spelling.
         assert_eq!(p.serialize(), "a=1&b=&c=x+y%2Cz&d=%25zz&=e&f=a%3Db");
         assert_eq!(
             Params::parse("kinds=AccessConsumed,AccessMinted").serialize(),
             "kinds=AccessConsumed%2CAccessMinted"
         );
+        // Valid UTF-8 decodes; an invalid byte becomes the replacement character, as in a browser.
         assert_eq!(Params::parse("x=%C3%A9%FF").get("x"), Some("é\u{FFFD}"));
         assert_eq!(Params::parse("").serialize(), "");
     }
 
+    /// Set replaces the first and drops the rest.
     #[test]
     fn set_replaces_the_first_and_drops_the_rest() {
         let mut p = Params::parse("limit=5&gate=0x1&limit=6");
+        // Set replaces the first limit and drops the later one.
         p.set("limit", "7".into());
         assert_eq!(p.serialize(), "limit=7&gate=0x1");
+        // A parameter that is absent is appended.
         p.set("kinds", "A".into());
         assert_eq!(p.serialize(), "limit=7&gate=0x1&kinds=A");
     }
 
+    /// Canonical forms.
     #[test]
     fn canonical_forms() {
+        // The long form of the short id `0xA`.
         let full = format!("0x{}a", "0".repeat(63));
         assert_eq!(canonical_query(&Params::parse("gate=0xA")).serialize(), format!("gate={full}"));
         assert_eq!(canonical_query(&Params::parse("limit=05")).serialize(), "limit=5");
         assert_eq!(canonical_query(&Params::parse("limit=0005")).serialize(), "limit=5");
+        // A limit of zero is not rewritten: it stays invalid and is refused later with a 400.
         assert_eq!(canonical_query(&Params::parse("limit=00000")).serialize(), "limit=00000");
         assert_eq!(
             canonical_query(&Params::parse("kinds=AccessMinted,AccessConsumed,AccessMinted")).serialize(),
@@ -255,8 +293,10 @@ mod tests {
         assert_eq!(canonical_path("/v1//gates/0xA/stats"), "/v1//gates/0xA/stats");
     }
 
+    /// Resolves dot segments.
     #[test]
     fn resolves_dot_segments() {
+        // Dot segments resolve like the URL parser, including percent-encoded ones and a trailing dot.
         assert_eq!(normalize_path("/v1/./testnet/../testnet/coverage"), "/v1/testnet/coverage");
         assert_eq!(normalize_path("/v1/%2E%2e/x"), "/x");
         assert_eq!(normalize_path("/a/b/.."), "/a/");
@@ -264,9 +304,11 @@ mod tests {
         assert_eq!(normalize_path("/../.."), "/");
         assert_eq!(normalize_path("/a\\b"), "/a/b");
         assert_eq!(normalize_path("/"), "/");
+        // An empty segment is kept, so `//healthz` is not rewritten into the exempt probe path.
         assert_eq!(normalize_path("//healthz"), "//healthz");
     }
 
+    /// A strategy producing query strings with the awkward cases (repeats, empty values, percent-encoding) for the idempotence property.
     fn query_text() -> impl Strategy<Value = String> {
         proptest::collection::vec(
             prop_oneof![
@@ -317,6 +359,7 @@ mod tests {
             prop_assert_eq!(keys, seen);
         }
 
+        /// Canonical path is idempotent.
         #[test]
         fn canonical_path_is_idempotent(id in "0x[0-9a-fA-F]{1,64}", net in "[a-z]{1,8}") {
             let p = canonical_path(&format!("/v1/{net}/gates/{id}/stats"));

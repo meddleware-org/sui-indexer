@@ -8,8 +8,10 @@ use crate::require_db;
 use crate::sui::normalize_sui_address;
 use crate::writer::Store;
 
+/// The stream the query-plan tests read.
 const STREAM: Stream = Stream::AccessGate;
 
+/// A distinct gate id for fixture `i`.
 fn gate(i: u32) -> String {
     normalize_sui_address(&format!("0x{i:x}"))
 }
@@ -38,6 +40,7 @@ async fn fill(s: &Store, n: u32) {
     .unwrap();
 }
 
+/// A page query with the given filters and a fixed page size.
 fn q(kinds: &[&str], gate_id: Option<String>, before_id: Option<i64>) -> PageQuery {
     PageQuery {
         kinds: (!kinds.is_empty()).then(|| kinds.iter().map(|k| (*k).to_owned()).collect()),
@@ -56,6 +59,7 @@ fn inline(stream: Stream, query: &PageQuery) -> String {
     sql
 }
 
+/// Run a statement and render its rows as text (for `EXPLAIN` output).
 async fn text_rows(s: &Store, sql: &str) -> String {
     let msgs = s.client().simple_query(sql).await.unwrap();
     msgs.iter()
@@ -91,12 +95,14 @@ async fn cost(s: &Store, query: &PageQuery) -> (i64, i64, String) {
     (buffers, removed, plan)
 }
 
+/// Run a page query and return the ids of the rows it returns.
 async fn run_ids(s: &Store, query: &PageQuery) -> Vec<i64> {
     let (sql, args) = page_sql(STREAM, query);
     let params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = args.iter().map(Arg::as_sql).collect();
     s.query(&sql, &params).await.unwrap().iter().map(|r| r.get(0)).collect()
 }
 
+/// The api answers without events kind and the index is in the first migration.
 #[tokio::test]
 async fn the_api_answers_without_events_kind_and_the_index_is_in_the_first_migration() {
     let db = require_db!();
@@ -126,6 +132,7 @@ async fn the_api_answers_without_events_kind_and_the_index_is_in_the_first_migra
     assert!(r.try_write().await.is_err());
 }
 
+/// Every filter shape uses the intended index.
 #[tokio::test]
 async fn every_filter_shape_uses_the_intended_index() {
     let db = require_db!();
@@ -198,6 +205,7 @@ async fn every_filter_shape_uses_the_intended_index() {
     assert!(p.contains("events_stream") && !p.contains("events_pkey"), "{p}");
 }
 
+/// Merged kind seeks return what the filter returns.
 #[tokio::test]
 async fn merged_kind_seeks_return_what_the_filter_returns() {
     let db = require_db!();

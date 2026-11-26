@@ -32,6 +32,7 @@ fi
 
 out="$(mktemp)"
 api="" ingest=""
+# cleanup <exit>: print the tail of each container log, remove the containers, the database and the work directory (runs on every exit path).
 cleanup() {
   for c in "$api" "$ingest"; do
     [ -n "$c" ] || continue
@@ -49,8 +50,10 @@ DOCKER="$docker" PG_NAME="$pgname" PG_PORT="$pgport" PG_DIR="$pgdir" bash "$here
 # shellcheck disable=SC1091
 . "$pgdir/env.sh"
 admin_pw="$(sed -E 's#.*postgres://postgres:([^@]+)@.*#\1#' <<< "$TEST_DATABASE_URL")"
+# Random passwords per run: nothing in the script or the logs is reusable.
 ingest_pw="$(openssl rand -hex 16)"
 api_pw="$(openssl rand -hex 16)"
+# psql_admin <psql args>: run psql as the database superuser inside the test container.
 psql_admin() { "$docker" exec -i "$pgname" psql -X -q -v ON_ERROR_STOP=1 -U postgres -h 127.0.0.1 "$@"; }
 psql_admin -d postgres << SQL
 CREATE ROLE sui_indexer_ingest LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION CONNECTION LIMIT 8 PASSWORD '${ingest_pw}';
@@ -69,8 +72,10 @@ GRANT USAGE ON SCHEMA public TO sui_indexer_api;
 ALTER DEFAULT PRIVILEGES FOR ROLE sui_indexer_ingest IN SCHEMA public GRANT SELECT ON TABLES TO sui_indexer_api;
 ALTER DEFAULT PRIVILEGES FOR ROLE sui_indexer_ingest IN SCHEMA public GRANT SELECT ON SEQUENCES TO sui_indexer_api;
 SQL
+# db_url <role> <password>: the verify-full connection URL of a role, as the deployed services use it.
 db_url() { echo "postgres://$1:$2@127.0.0.1:${pgport}/sui_indexer?sslmode=verify-full&sslrootcert=/etc/postgres-ca/ca.crt"; }
 
+# The containers run the way the cluster runs them: read-only root, no capabilities, no privilege escalation; a placeholder node and package ids are enough because no chain is reached.
 common=(--network host --read-only --cap-drop ALL --security-opt no-new-privileges
   -v "${pgdir}/certs/ca.crt:/etc/postgres-ca/ca.crt:ro"
   -e NETWORK=localnet -e GRPC_URL=http://127.0.0.1:9
@@ -78,11 +83,13 @@ common=(--network host --read-only --cap-drop ALL --security-opt no-new-privileg
 api_env=(-e "DATABASE_URL=$(db_url sui_indexer_api "$api_pw")" -e PORT="$port" -e DB_POOL_SIZE=3)
 ingest_env=(-e "DATABASE_URL=$(db_url sui_indexer_ingest "$ingest_pw")")
 
-get() { # get <path> → status code, body in $out
+# get <path> → status code, body in $out
+get() {
   curl -sS -o "$out" -w '%{http_code}' "http://127.0.0.1:${port}$1" || echo 000
 }
 
-wait_for() { # wait_for <path> <status>
+# wait_for <path> <status>
+wait_for() {
   for _ in $(seq 1 40); do
     [ "$(get "$1")" = "$2" ] && return 0
     sleep 1

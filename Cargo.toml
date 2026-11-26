@@ -1,7 +1,9 @@
+# The workspace: four crates sharing one version, edition and lint set. The release profile favours safety (overflow checks, abort on panic) over a few percent of speed.
 [workspace]
 resolver = "3"
 members = ["crates/store", "crates/ingest", "crates/api", "crates/testkit"]
 
+# Fields every crate inherits, so one edit bumps the version of all.
 [workspace.package]
 version = "0.0.21"
 edition = "2024"
@@ -13,16 +15,22 @@ publish = false
 
 [workspace.lints.rust]
 unsafe_code = "deny"
+# Every item has a doc comment, private ones and fields included (the workspace documentation standard, D144).
+missing_docs = "deny"
 
 [workspace.lints.clippy]
 dbg_macro = "deny"
 todo = "deny"
+missing_docs_in_private_items = "deny"
 
+# The shipped binaries are built with these settings.
 [profile.release]
 # Arithmetic overflow aborts instead of wrapping silently, even in release builds.
 overflow-checks = true
 # A panic stops the process (Kubernetes restarts the container with clean state).
 panic = "abort"
+# Link-time optimisation and one codegen unit shrink and speed the static binary.
 lto = true
 codegen-units = 1
+# Strip symbols: the image carries no debug information.
 strip = true

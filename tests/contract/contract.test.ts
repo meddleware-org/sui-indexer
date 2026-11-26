@@ -12,6 +12,7 @@ import { listAccessGateEvents } from '@meddleware/access-gate-client'
 import { listSealedContent } from '@meddleware/sealed-storage-client'
 import { normalizeSuiAddress } from '@mysten/sui/utils'
 
+// The binaries under test, built by the CI job; locally they default to a release build in the workspace.
 const API_BIN = resolve(process.env.API_BIN ?? '../../target/release/api')
 const SEED_BIN = resolve(process.env.SEED_BIN ?? '../../target/release/seed-fixture')
 const AG = normalizeSuiAddress('0xa1')

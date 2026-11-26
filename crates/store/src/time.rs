@@ -9,16 +9,19 @@ pub fn now_ms() -> i64 {
 
 /// `new Date(ms).toISOString()`: `YYYY-MM-DDTHH:MM:SS.mmmZ` (UTC), for years 0..=9999.
 pub fn iso(ms: i64) -> String {
+    // Euclidean division keeps the remainder non-negative, so times before 1970 still print correctly.
     let secs = ms.div_euclid(1000);
     let milli = ms.rem_euclid(1000);
     let days = secs.div_euclid(86_400);
     let sod = secs.rem_euclid(86_400);
+    // The date part comes from a day count with no calendar tables.
     let (y, m, d) = civil_from_days(days);
     format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}.{milli:03}Z", sod / 3600, sod % 3600 / 60, sod % 60)
 }
 
 /// Howard Hinnant's `civil_from_days`: days since 1970-01-01 → (year, month, day).
 fn civil_from_days(z: i64) -> (i64, i64, i64) {
+    // Shift the epoch to 0000-03-01, so leap days fall at the end of each year of the algorithm.
     let z = z + 719_468;
     let era = z.div_euclid(146_097);
     let doe = z.rem_euclid(146_097);
@@ -31,10 +34,12 @@ fn civil_from_days(z: i64) -> (i64, i64, i64) {
     (if m <= 2 { y + 1 } else { y }, m, d)
 }
 
+/// Unit tests for the clock helpers.
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// Iso matches to iso string.
     #[test]
     fn iso_matches_to_iso_string() {
         assert_eq!(iso(0), "1970-01-01T00:00:00.000Z");

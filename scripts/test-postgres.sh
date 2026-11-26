@@ -11,6 +11,7 @@
 # ever in the container's environment and $PG_DIR/env.sh.
 set -euo pipefail
 
+# Every setting can be overridden from the environment (podman, another port or another image).
 docker="${DOCKER:-docker}"
 name="${PG_NAME:-sui-indexer-test-pg}"
 port="${PG_PORT:-55432}"
@@ -22,6 +23,7 @@ case "${1:-}" in
     mkdir -p "$dir/certs"
     (
       cd "$dir/certs"
+      # A throwaway CA, valid for three days, so the tests use the same verify-full path as production.
       openssl req -x509 -newkey rsa:2048 -nodes -keyout ca.key -out ca.crt -days 3 -subj "/CN=sui-indexer-test-ca" 2> /dev/null
       openssl req -newkey rsa:2048 -nodes -keyout server.key -out server.csr -subj "/CN=localhost" 2> /dev/null
       printf 'subjectAltName=DNS:localhost,IP:127.0.0.1\n' > ext.cnf
@@ -55,6 +57,7 @@ case "${1:-}" in
     fi
     echo "PostgreSQL ready on 127.0.0.1:${port} (env: ${dir}/env.sh, CA: ${dir}/certs/ca.crt)"
     ;;
+  # `stop` removes the container and its data; running it twice is harmless.
   stop)
     "$docker" rm -f "$name" > /dev/null 2>&1 || true
     rm -rf "$dir"

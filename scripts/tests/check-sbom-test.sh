@@ -36,23 +36,30 @@ cat > "$tmp/metadata.json" <<'JSON'
   ]}
 }
 JSON
+# The script under test reads the dependency graph from this file instead of running cargo.
 export CARGO_METADATA="$tmp/metadata.json"
 
-cdx() { # cdx <name@version>... → a CycloneDX document with app as the metadata component
+# cdx <name@version>... → a CycloneDX document with app as the metadata component
+cdx() {
   local comps
   comps="$(printf '%s\n' "$@" | jq -R 'split("@") | {type: "library", name: .[0], version: .[1]}' | jq -sc .)"
   jq -n --argjson c "$comps" '{bomFormat: "CycloneDX", specVersion: "1.5", metadata: {component: {name: "app", version: "0.0.12"}}, components: $c}'
 }
 
+# Count the passing cases, so the closing line can report them.
 pass=0
-expect() { # expect <0|1 (non-zero)> <description> <sbom-json> [packages...]
+# expect <0|1 (non-zero)> <description> <sbom-json> [packages...]
+expect() {
   local want="$1" what="$2" doc="$3"
   shift 3
+  # Write the SBOM the case supplies where the script expects it.
   echo "$doc" > "$tmp/sbom.json"
+  # Run the script without aborting on its non-zero exit, because some cases expect failure.
   set +e
   bash "$check" "$tmp/sbom.json" "$@" > "$tmp/out" 2>&1
   local got=$?
   set -e
+  # Compare the real exit status with the expected one; a mismatch prints the script output and fails the run.
   if { [ "$want" = 0 ] && [ "$got" != 0 ]; } || { [ "$want" != 0 ] && [ "$got" = 0 ]; }; then
     echo "FAIL: ${what}: exit ${got}, want $([ "$want" = 0 ] && echo 0 || echo 'non-zero')" >&2
     cat "$tmp/out" >&2

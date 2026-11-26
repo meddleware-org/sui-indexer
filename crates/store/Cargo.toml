@@ -1,3 +1,4 @@
+# The store crate: schema, migrations, writes and reads shared by the ingester and the API. Versions are pinned exactly (`=`).
 [package]
 name = "sui-indexer-store"
 description = "PostgreSQL schema, migrations, writes and reads shared by the sui-indexer ingester and API."
@@ -8,9 +9,11 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+# Use the workspace lint set.
 [lints]
 workspace = true
 
+# Runtime dependencies; each is pinned exactly and has default features off where possible.
 [dependencies]
 # PostgreSQL client: tokio-postgres (no ORM), a deadpool pool for the API, TLS by rustls (the provider
 # the gRPC client already uses: ring), `verify-full` only.
@@ -30,6 +33,7 @@ getrandom = "=0.4.3"
 # Adds no dependency; never enabled in a shipped build.
 testing = []
 
+# Used by the tests only.
 [dev-dependencies]
 tempfile = "=3.27.0"
 tokio = { version = "=1.54.1", features = ["rt-multi-thread", "macros", "time", "sync"] }

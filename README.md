@@ -164,6 +164,9 @@ The client contract (`tests/contract`, CI only) runs the published client packag
 `api` binary, with a database seeded by the testkit's `seed-fixture`:
 `cargo build --release -p sui-indexer-api -p sui-indexer-testkit && cd tests/contract && npm ci && TEST_DATABASE_URL=… npm test`.
 
+To build, test and propose a change see [CONTRIBUTING.md](CONTRIBUTING.md). Every item has a doc comment (`missing_docs` and
+`clippy::missing_docs_in_private_items` are denied in the workspace lints), so a new item without one does not build.
+
 Container image: `quay.io/meddleware-org/sui-indexer`, built by `docker-publish.yml` on a `v*` tag.
 The tag must match the Cargo workspace version. Deployment manifests live in the infrastructure workspace
 (`post-bootstrap/sui-indexer`).

@@ -17,13 +17,16 @@ on:
   # The release workflow runs the same checks on the tagged commit.
   workflow_call:
 
+# Least privilege: CI only reads the repository.
 permissions:
   contents: read
 
 env:
+  # No tool in the pipeline may send telemetry.
   DO_NOT_TRACK: "1"
 
 jobs:
+  # The main gate: format, lints, tests against a real database, coverage, dependency policy and the SBOM check.
   check:
     name: fmt, clippy, test, coverage, cargo-deny, SBOM gate
     runs-on: ubuntu-latest
@@ -39,12 +42,15 @@ jobs:
           # Only save the cache on main-branch pushes to avoid saturating the cache upload bandwidth.
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
+      # Formatting is not negotiable in review: the check fails on any difference.
       - name: Format check
         run: cargo fmt --check
 
+      # Warnings are errors, and the workspace lints (missing docs, no unsafe code) are part of the gate.
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
+      # A throwaway database with TLS, so the tests exercise the same verify-full path as production.
       - name: Start PostgreSQL (TLS)
         run: bash scripts/test-postgres.sh start
 
@@ -87,15 +93,18 @@ jobs:
       - name: Index gate tests
         run: bash scripts/tests/check-index-test.sh
 
+      # Always stop it, even when a step failed, so the runner is left clean.
       - name: Stop PostgreSQL
         if: always()
         run: bash scripts/test-postgres.sh stop
 
+  # The declared minimum Rust version must still build and pass the tests, so `rust-version` is a fact, not a hope.
   msrv:
     name: MSRV (rust-version in Cargo.toml)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The oldest compiler the manifest promises to support.
       - name: Install the declared minimum toolchain
         run: rustup toolchain install 1.88 --profile minimal --no-self-update && rustup default 1.88
       - name: Check on the declared minimum toolchain
@@ -112,6 +121,7 @@ jobs:
         if: always()
         run: bash scripts/test-postgres.sh stop
 
+  # The published TypeScript clients run against the built API binary, proving the wire contract both ways.
   contract:
     name: Client contract (published clients against the api binary)
     runs-on: ubuntu-latest
@@ -125,6 +135,7 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
+      # Release builds, because the contract runs the real binaries.
       - name: Build the api binary and the fixture seeder
         run: cargo build --release --locked -p sui-indexer-api -p sui-indexer-testkit
 
@@ -150,6 +161,7 @@ jobs:
         if: always()
         run: bash scripts/test-postgres.sh stop
 
+  # The release image: scanned configuration, licence notices, the build, a vulnerability scan and a two-container smoke test.
   image:
     name: Image (configuration scan, licence notices, build, scan, smoke test)
     runs-on: ubuntu-latest
@@ -176,6 +188,7 @@ jobs:
             grep -q 'Apache License' "THIRD_PARTY_LICENSES-${bin}.txt"
           done
 
+      # The Dockerfile as the release builds it, tagged locally only.
       - name: Build (not pushed)
         run: docker build --tag sui-indexer:ci .
 

@@ -1,3 +1,4 @@
+# The ingester crate: the `ingest` binary (the only writer) and the library its tests use. Versions are pinned exactly (`=`).
 [package]
 name = "sui-indexer-ingest"
 description = "sui-indexer ingester: the sole writer; polls the full node's ListEvents into PostgreSQL."
@@ -8,9 +9,11 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+# Use the workspace lint set.
 [lints]
 workspace = true
 
+# The binary is called `ingest`.
 [[bin]]
 name = "ingest"
 path = "src/main.rs"
@@ -22,11 +25,13 @@ sui-indexer-store = { path = "../store" }
 sui-rpc = { version = "=0.4.0", default-features = false }
 tonic = { version = "=0.14.9", default-features = false }
 prost-types = "=0.14.4"
+# The runtime (one thread), base64 for the cursors, base58 for chain identifiers and JSON for the node's event rendering.
 tokio = { version = "=1.54.1", features = ["rt", "macros", "time", "signal"] }
 base64 = "=0.23.1"
 bs58 = { version = "=0.5.1", default-features = false, features = ["alloc"] }
 serde_json = "=1.0.154"
 
+# Used by the tests only.
 [dev-dependencies]
 sui-indexer-store = { path = "../store", features = ["testing"] }
 tokio = { version = "=1.54.1", features = ["rt", "macros", "time", "net", "test-util"] }

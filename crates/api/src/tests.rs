@@ -15,12 +15,14 @@ use sui_indexer_testkit::{self as kit, gate_a, gate_b, minted};
 use crate::handler::{ApiContext, ApiRequest, ApiResponse, Db, handle};
 use crate::ratelimit::RateLimiter;
 
+/// A seeded database with its store and the API context over the SELECT-only role.
 struct Setup {
     db: TestDb,
     store: Store,
     ctx: ApiContext,
 }
 
+/// Build the API context over the database's read-only role, with the given limiter and a four-connection pool.
 fn context(db: &TestDb, limiter: RateLimiter) -> ApiContext {
     ApiContext {
         db: Db::new(Reader::new(&db.api, 4).unwrap()),
@@ -31,6 +33,7 @@ fn context(db: &TestDb, limiter: RateLimiter) -> ApiContext {
     }
 }
 
+/// A store with both packages bound to the fixtures' ids.
 async fn bound_store(db: &TestDb) -> Store {
     let mut store = db.store().await;
     store
@@ -40,6 +43,7 @@ async fn bound_store(db: &TestDb) -> Store {
     store
 }
 
+/// Create a database, seed the fixture events, mark both streams as just polled and build the context; `None` when no test database is configured.
 async fn setup_with(limiter: RateLimiter) -> Option<Setup> {
     let db = TestDb::create().await?;
     let mut store = bound_store(&db).await;
@@ -51,6 +55,7 @@ async fn setup_with(limiter: RateLimiter) -> Option<Setup> {
     Some(s)
 }
 
+/// The default setup: a limiter generous enough not to interfere.
 async fn setup() -> Option<Setup> {
     setup_with(RateLimiter::new(1000, 1000)).await
 }
@@ -72,12 +77,14 @@ macro_rules! setup {
 }
 
 impl Setup {
+    /// Record a successful poll of a stream at time `t` (controls the health and freshness answers).
     async fn set_last_poll(&self, t: i64, stream: Stream) {
         let mut st = self.store.poll_state(stream).await.unwrap();
         st.last_success_at = t;
         self.store.record_poll(stream, &st).await.unwrap();
     }
 
+    /// Run one request through the handler as the transport would, from a fixed remote address, and return the answer.
     async fn request(&self, method: &str, url: &str, headers: &[(&str, &str)]) -> ApiResponse {
         let (path, query) = match url.split_once('?') {
             Some((p, q)) => (p, Some(q)),
@@ -99,29 +106,35 @@ impl Setup {
         .expect("no internal error")
     }
 
+    /// A GET with no extra headers.
     async fn get(&self, url: &str) -> ApiResponse {
         self.request("GET", url, &[]).await
     }
 
+    /// A GET with the given request headers.
     async fn get_h(&self, url: &str, headers: &[(&str, &str)]) -> ApiResponse {
         self.request("GET", url, headers).await
     }
 }
 
+/// The answer body parsed as JSON.
 fn body(r: &ApiResponse) -> Value {
     serde_json::from_str(&r.body).unwrap()
 }
 
+/// The checkpoints of the events in a page body, in served order.
 fn checkpoints(b: &Value) -> Vec<String> {
     b["events"].as_array().unwrap().iter().map(|e| e["checkpoint"].as_str().unwrap().to_owned()).collect()
 }
 
+/// The first fixture gate's id in its long form.
 fn full_a() -> String {
     format!("0x{}a", "0".repeat(63))
 }
 
 // ── events pages ────────────────────────────────────────────────────────────
 
+/// Serves the newest page with short cache headers and an etag.
 #[tokio::test]
 async fn serves_the_newest_page_with_short_cache_headers_and_an_etag() {
     let s = setup!();
@@ -141,6 +154,7 @@ async fn serves_the_newest_page_with_short_cache_headers_and_an_etag() {
     assert_eq!(s.get_h("/v1/testnet/access-gate/events?limit=2", &[("if-none-match", &etag)]).await.status, 304);
 }
 
+/// Serves older pages as immutable and ends with a null cursor.
 #[tokio::test]
 async fn serves_older_pages_as_immutable_and_ends_with_a_null_cursor() {
     let s = setup!();
@@ -157,6 +171,7 @@ async fn serves_older_pages_as_immutable_and_ends_with_a_null_cursor() {
     assert!(b3["cursor"].is_null());
 }
 
+/// Filters by kinds and gate.
 #[tokio::test]
 async fn filters_by_kinds_and_gate() {
     let s = setup!();
@@ -166,6 +181,7 @@ async fn filters_by_kinds_and_gate() {
     assert!(events[0]["eventType"].as_str().unwrap().ends_with("AccessConsumedEvent"));
 }
 
+/// Refuses a cursor from another index generation.
 #[tokio::test]
 async fn refuses_a_cursor_from_another_index_generation() {
     let s = setup!();
@@ -175,6 +191,7 @@ async fn refuses_a_cursor_from_another_index_generation() {
     assert_eq!(r.header("Cache-Control"), Some("no-store"));
 }
 
+/// Validates strictly.
 #[tokio::test]
 async fn validates_strictly() {
     let s = setup!();
@@ -214,6 +231,7 @@ async fn validates_strictly() {
     assert_eq!(s.get(&format!("/v1/testnet/access-gate/events?kinds={all}")).await.status, 301);
 }
 
+/// Lists sealed content for one gate.
 #[tokio::test]
 async fn lists_sealed_content_for_one_gate() {
     let s = setup!();
@@ -222,6 +240,7 @@ async fn lists_sealed_content_for_one_gate() {
     assert_eq!(checkpoints(&b), ["8", "6"]);
 }
 
+/// Rows are served verbatim in the clients shape.
 #[tokio::test]
 async fn rows_are_served_verbatim_in_the_clients_shape() {
     let s = setup!();
@@ -260,6 +279,7 @@ async fn rows_are_served_verbatim_in_the_clients_shape() {
 
 // ── stats, coverage and health ──────────────────────────────────────────────
 
+/// Counts a gates events and sums commission exactly.
 #[tokio::test]
 async fn counts_a_gates_events_and_sums_commission_exactly() {
     let mut s = setup!();
@@ -284,6 +304,7 @@ async fn counts_a_gates_events_and_sums_commission_exactly() {
     );
 }
 
+/// Stats of an unknown gate are zero.
 #[tokio::test]
 async fn stats_of_an_unknown_gate_are_zero() {
     let s = setup!();
@@ -291,6 +312,7 @@ async fn stats_of_an_unknown_gate_are_zero() {
     assert_eq!((b["minted"].as_i64(), b["commissionMist"].as_str()), (Some(0), Some("0")));
 }
 
+/// Reports coverage per stream.
 #[tokio::test]
 async fn reports_coverage_per_stream() {
     let s = setup!();
@@ -306,6 +328,7 @@ async fn reports_coverage_per_stream() {
     assert!(r.body.starts_with(r#"{"network":"testnet","generation":""#));
 }
 
+/// Metrics report each streams last success and freshness by the healthz rule.
 #[tokio::test]
 async fn metrics_report_each_streams_last_success_and_freshness_by_the_healthz_rule() {
     let s = setup!();
@@ -350,12 +373,14 @@ async fn metrics_report_each_streams_last_success_and_freshness_by_the_healthz_r
     }
 }
 
+/// Metrics are not on the public api.
 #[tokio::test]
 async fn metrics_are_not_on_the_public_api() {
     let s = setup!();
     assert_eq!(s.get("/metrics").await.status, 404);
 }
 
+/// Healthz is 503 before the first poll and after polls stall and names the stream and its error.
 #[tokio::test]
 async fn healthz_is_503_before_the_first_poll_and_after_polls_stall_and_names_the_stream_and_its_error() {
     let s = setup!();
@@ -387,6 +412,7 @@ async fn healthz_is_503_before_the_first_poll_and_after_polls_stall_and_names_th
     assert_eq!(s.get("/readyz").await.body, r#"{"ok":true}"#);
 }
 
+/// Head pages say how fresh the index is and older pages stay free of it.
 #[tokio::test]
 async fn head_pages_say_how_fresh_the_index_is_and_older_pages_stay_free_of_it() {
     let s = setup!();
@@ -403,6 +429,7 @@ async fn head_pages_say_how_fresh_the_index_is_and_older_pages_stay_free_of_it()
     assert!(body(&s.get("/v1/testnet/access-gate/events").await)["polledAt"].is_null());
 }
 
+/// An empty stream has no coverage fields.
 #[tokio::test]
 async fn an_empty_stream_has_no_coverage_fields() {
     let db = require_db!();
@@ -413,16 +440,19 @@ async fn an_empty_stream_has_no_coverage_fields() {
     assert_eq!(r.header("ETag").unwrap().split('-').nth(1), Some("0\""));
 }
 
+/// A bare request for the pure-function tests.
 fn req<'a>(method: &'a str, path: &'a str, query: Option<&'a str>) -> ApiRequest<'a> {
     ApiRequest { method, path, query, cf_connecting_ip: None, if_none_match: None, remote_address: None }
 }
 
 // ── canonical URLs (one cache entry per query) ─────────────────────────────
 
+/// The `Location` of a redirect answer, if it is one.
 fn loc(r: &ApiResponse) -> Option<String> {
     (r.status == 301).then(|| r.header("Location").unwrap().to_owned())
 }
 
+/// Redirects other spellings of a query to the canonical form cacheably.
 #[tokio::test]
 async fn redirects_other_spellings_of_a_query_to_the_canonical_form_cacheably() {
     let s = setup!();
@@ -454,6 +484,7 @@ async fn redirects_other_spellings_of_a_query_to_the_canonical_form_cacheably() 
     assert_eq!(r.body, "");
 }
 
+/// Serves canonical queries without a redirect.
 #[tokio::test]
 async fn serves_canonical_queries_without_a_redirect() {
     let s = setup!();
@@ -470,6 +501,7 @@ async fn serves_canonical_queries_without_a_redirect() {
     }
 }
 
+/// The redirect target is itself canonical.
 #[tokio::test]
 async fn the_redirect_target_is_itself_canonical() {
     let s = setup!();
@@ -478,6 +510,7 @@ async fn the_redirect_target_is_itself_canonical() {
     assert_eq!(s.get(first.header("Location").unwrap()).await.status, 200);
 }
 
+/// Dot segments resolve like the url parser.
 #[tokio::test]
 async fn dot_segments_resolve_like_the_url_parser() {
     let s = setup!();
@@ -487,6 +520,7 @@ async fn dot_segments_resolve_like_the_url_parser() {
 
 // ── transport rules ─────────────────────────────────────────────────────────
 
+/// Revalidates with weak listed or wildcard if none match.
 #[tokio::test]
 async fn revalidates_with_weak_listed_or_wildcard_if_none_match() {
     let s = setup!();
@@ -506,6 +540,7 @@ async fn revalidates_with_weak_listed_or_wildcard_if_none_match() {
     assert!(older.header("ETag").unwrap().contains("-b"));
 }
 
+/// A new event changes the head etag.
 #[tokio::test]
 async fn a_new_event_changes_the_head_etag() {
     let mut s = setup!();
@@ -516,6 +551,7 @@ async fn a_new_event_changes_the_head_etag() {
     assert_ne!(after.header("ETag").unwrap(), before);
 }
 
+/// Rate limits per client ip preferring cf connecting ip and never limits health.
 #[tokio::test]
 async fn rate_limits_per_client_ip_preferring_cf_connecting_ip_and_never_limits_health() {
     let s = setup!(RateLimiter::new(1, 2));
@@ -534,6 +570,7 @@ async fn rate_limits_per_client_ip_preferring_cf_connecting_ip_and_never_limits_
     assert_eq!(s.get("/v1/testnet/coverage").await.status, 200);
 }
 
+/// Answers preflight refuses writes and sends no body for head.
 #[tokio::test]
 async fn answers_preflight_refuses_writes_and_sends_no_body_for_head() {
     let s = setup!();
@@ -553,6 +590,7 @@ async fn answers_preflight_refuses_writes_and_sends_no_body_for_head() {
 
 // ── the database lifecycle (read-only API, ingester creates the database) ──
 
+/// Before the ingester migrates everything but options is 503 and the api creates nothing.
 #[tokio::test]
 async fn before_the_ingester_migrates_everything_but_options_is_503_and_the_api_creates_nothing() {
     let db = require_db!();
@@ -587,6 +625,7 @@ async fn before_the_ingester_migrates_everything_but_options_is_503_and_the_api_
     assert_eq!(handle(&ctx, &req("GET", "/v1/testnet/coverage", None)).await.unwrap().status, 200);
 }
 
+/// A database that cannot be reached is 503 database unavailable and recovers.
 #[tokio::test]
 async fn a_database_that_cannot_be_reached_is_503_database_unavailable_and_recovers() {
     let s = setup!();
@@ -613,6 +652,7 @@ async fn a_database_that_cannot_be_reached_is_503_database_unavailable_and_recov
     assert_eq!(s.get("/readyz").await.status, 200);
 }
 
+/// A connection the server closed is replaced not served.
 #[tokio::test]
 async fn a_connection_the_server_closed_is_replaced_not_served() {
     let s = setup!();
@@ -626,6 +666,7 @@ async fn a_connection_the_server_closed_is_replaced_not_served() {
     assert_eq!(s.get("/v1/testnet/coverage").await.status, 200);
 }
 
+/// A request that times out does not poison the pool.
 #[tokio::test]
 async fn a_request_that_times_out_does_not_poison_the_pool() {
     let s = setup!();
@@ -642,6 +683,7 @@ async fn a_request_that_times_out_does_not_poison_the_pool() {
     }
 }
 
+/// A reindex by the ingester rotates the generation the api serves.
 #[tokio::test]
 async fn a_reindex_by_the_ingester_rotates_the_generation_the_api_serves() {
     let mut s = setup!();
@@ -655,6 +697,7 @@ async fn a_reindex_by_the_ingester_rotates_the_generation_the_api_serves() {
 
 // ── socket wiring (main) ────────────────────────────────────────────────────
 
+/// A raw HTTP request to a locally bound server; returns the status, headers and body.
 async fn http_get(
     addr: std::net::SocketAddr,
     method: &str,
@@ -676,6 +719,7 @@ async fn http_get(
     (status, hs, body)
 }
 
+/// Serves over http and stops on shutdown.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn serves_over_http_and_stops_on_shutdown() {
     let s = setup!();
@@ -708,6 +752,7 @@ async fn serves_over_http_and_stops_on_shutdown() {
     drop(store);
 }
 
+/// A client that never finishes its headers is cut off.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_client_that_never_finishes_its_headers_is_cut_off() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -727,6 +772,7 @@ async fn a_client_that_never_finishes_its_headers_is_cut_off() {
     assert!(waited >= std::time::Duration::from_secs(4) && waited < std::time::Duration::from_secs(8), "{waited:?}");
 }
 
+/// The context follows the configuration.
 #[tokio::test]
 async fn the_context_follows_the_configuration() {
     // No database needed: routing and the rate limit precede it, and the pool connects on demand.
@@ -748,6 +794,7 @@ async fn the_context_follows_the_configuration() {
     assert_eq!(r.status, 429); // burst 1, the first request consumed it
 }
 
+/// An oversized request head is refused.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_oversized_request_head_is_refused() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};

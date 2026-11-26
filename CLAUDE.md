@@ -148,6 +148,7 @@ scripts/         smoke.sh (image + PostgreSQL), test-postgres.sh (pinned TLS Pos
 
 | Task | Command |
 | --- | --- |
+| Documentation | `missing_docs` and `clippy::missing_docs_in_private_items` are `deny` in `[workspace.lints]`: every item, field and variant has a `///` comment, private ones too (test modules are exempt from the lint but not from the standard). `CONTRIBUTING.md` says how to build and test |
 | Format / lint | `cargo fmt --check` / `cargo clippy --workspace --all-targets --locked -- -D warnings` |
 | Tests | `bash scripts/test-postgres.sh start && . "${TMPDIR:-/tmp}/sui-indexer-test-pg/env.sh"` then `cargo test --workspace --locked` |
 | Coverage | `cargo llvm-cov --workspace --locked --summary-only` |

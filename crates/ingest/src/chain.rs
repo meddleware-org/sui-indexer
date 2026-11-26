@@ -24,10 +24,12 @@ pub fn short_chain_id(chain_identifier: &str) -> Result<String, String> {
     Ok(bytes[..4].iter().map(|b| format!("{b:02x}")).collect())
 }
 
+/// Unit tests for the chain identifier mapping.
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// Maps the full genesis digest to the short id.
     #[test]
     fn maps_the_full_genesis_digest_to_the_short_id() {
         // Values observed from the public full nodes (x-sui-chain-id).
@@ -50,6 +52,7 @@ mod tests {
         assert_eq!(KNOWN_CHAIN_IDS.iter().map(|(n, _)| *n).collect::<Vec<_>>(), ["testnet", "mainnet"]);
     }
 
+    /// Rejects anything that is not base58 of at least four bytes.
     #[test]
     fn rejects_anything_that_is_not_base58_of_at_least_four_bytes() {
         assert!(short_chain_id("").is_err());

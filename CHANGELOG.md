@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- The start-up messages that named the full node (`GRPC_URL`) repeated the whole URL, so a URL carrying a user name, password or key
+  put it in the container log. They now name the node by its scheme, host and port only (`describe_url`).
+
+### Changed
+
+- `missing_docs` and `clippy::missing_docs_in_private_items` are denied in the workspace lints; every item, field and variant has a doc
+  comment, and the sources, scripts and workflows carry line-level comments. `CONTRIBUTING.md` added. No behaviour change.
+
 ## [0.0.21] - 2026-11-19
 
 ### Fixed

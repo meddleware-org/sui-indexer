@@ -7,22 +7,28 @@ check="${here}/../check-index.sh"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
+# The media type of a standard OCI image index.
 OCI="application/vnd.oci.image.index.v1+json"
-img() { # img <digest> <arch>
+# img <digest> <arch>
+img() {
   jq -n --arg d "$1" --arg a "$2" '{digest: $d, platform: {os: "linux", architecture: $a}}'
 }
-att() { # att <digest> <of-digest>
+# att <digest> <of-digest>
+att() {
   jq -n --arg d "$1" --arg o "$2" '{digest: $d, platform: {os: "unknown", architecture: "unknown"},
     annotations: {"vnd.docker.reference.type": "attestation-manifest", "vnd.docker.reference.digest": $o}}'
 }
-index() { # index <mediaType> <manifest>...
+# index <mediaType> <manifest>...
+index() {
   local mt="$1"
   shift
   printf '%s\n' "$@" | jq -s --arg mt "$mt" '{schemaVersion: 2, mediaType: $mt, manifests: .}'
 }
 
+# Count the passing cases, so the closing line can report them.
 pass=0
-expect() { # expect <0|1> <description> <index-json>
+# expect <0|1> <description> <index-json>
+expect() {
   local want="$1" what="$2"
   echo "$3" > "$tmp/index.json"
   set +e
@@ -37,6 +43,7 @@ expect() { # expect <0|1> <description> <index-json>
   pass=$((pass + 1))
 }
 
+# Fixture manifests: two architectures and the attestation manifests that must accompany each.
 A="$(img sha256:aa amd64)"; B="$(img sha256:bb arm64)"
 AA="$(att sha256:a1 sha256:aa)"; BA="$(att sha256:b1 sha256:bb)"
 

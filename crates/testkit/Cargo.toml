@@ -1,3 +1,4 @@
+# The test fixtures: event builders, a BCS writer and the `seed-fixture` binary the end-to-end tests use. Dev-only: no shipped binary links it.
 [package]
 name = "sui-indexer-testkit"
 description = "Test fixtures for sui-indexer (dev-only; never linked into the shipped binaries)."
@@ -8,14 +9,18 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+# Use the workspace lint set.
 [lints]
 workspace = true
 
+# The seeding tool for the contract and smoke tests.
 [[bin]]
 name = "seed-fixture"
 path = "src/main.rs"
 
+# Only what the fixtures need; the store crate's `testing` feature provides the database harness.
 [dependencies]
+# The store's `testing` feature provides the throwaway-database harness the fixtures seed.
 sui-indexer-store = { path = "../store", features = ["testing"] }
 serde_json = "=1.0.154"
 tokio = { version = "=1.54.1", features = ["rt-multi-thread", "macros", "time"] }

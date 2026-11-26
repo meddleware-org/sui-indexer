@@ -1,6 +1,12 @@
+# Files kept out of the image build context: the build needs the workspace sources, the lockfile and the notices configuration only.
+# Local build output (it can be gigabytes and is rebuilt in the image).
 target
+# The contract tests' installed packages; the image never runs them.
 **/node_modules
+# Repository history and CI configuration.
 .git
 .github
+# Documentation (the image carries only the licence notices it generates).
 *.md
+# Environment files can hold secrets; a context must never carry them.
 .env*

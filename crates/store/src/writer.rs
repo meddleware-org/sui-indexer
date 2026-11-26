@@ -41,6 +41,7 @@ pub struct ConnectOptions {
 }
 
 impl Default for ConnectOptions {
+    /// The default options: wait five seconds for the writer lock and show `sui-indexer-ingest` as the application name.
     fn default() -> Self {
         ConnectOptions { lock_wait: Duration::from_secs(5), application_name: "sui-indexer-ingest" }
     }
@@ -53,24 +54,37 @@ pub(crate) fn new_generation() -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
 }
 
+/// The prepared statements the writer reuses for every event, so each insert is one round trip per statement with no re-planning.
 struct Statements {
+    /// Insert one event row (ignoring a duplicate transaction digest and event index).
     insert_event: Statement,
+    /// Bump the stream's counters and checkpoint range.
     bump_stream: Statement,
+    /// Bump the per-gate count for the event kind.
     bump_gate: Statement,
+    /// Add the minted commission to the gate's total.
     bump_commission: Statement,
+    /// Store the stream's poll cursor.
     upsert_cursor: Statement,
+    /// Store a heartbeat value (poll state or liveness).
     upsert_heartbeat: Statement,
+    /// Store a `meta` value.
     upsert_meta: Statement,
+    /// Count an undecodable event on the stream.
     note_undecodable: Statement,
 }
 
 /// The writer.
 pub struct Store {
+    /// The one connection to the database, as the owner role.
     client: Client,
+    /// The current index generation.
     generation: String,
+    /// The prepared statements.
     stmts: Statements,
 }
 
+/// A checkpoint as the `i64` the database stores; larger values are rejected rather than wrapped.
 fn checkpoint_i64(c: u64) -> Result<i64> {
     i64::try_from(c).map_err(|_| StoreError::Data("checkpoint exceeds i64".into()))
 }
@@ -106,19 +120,24 @@ impl Store {
         Self::connect_with(settings, ConnectOptions::default()).await
     }
 
+    /// Connect with explicit options: how long to wait for the writer lock and which application name to show in `pg_stat_activity`.
     pub async fn connect_with(settings: &DatabaseSettings, opts: ConnectOptions) -> Result<Store> {
         let mut client = settings.clone().with_application_name(opts.application_name).connect().await?;
+        // The old writer may still be shutting down during a rollout, so the new one waits a little for its lock.
         let deadline = tokio::time::Instant::now() + opts.lock_wait;
         loop {
+            // A session-level advisory lock makes this the only writer: two ingesters would race on the cursors and counters.
             let got: bool = client.query_one("SELECT pg_try_advisory_lock($1)", &[&WRITER_LOCK_KEY]).await?.get(0);
             if got {
                 break;
             }
             if tokio::time::Instant::now() >= deadline {
+                // Give up with a clear error instead of waiting for ever.
                 return Err(StoreError::WriterLockHeld);
             }
             tokio::time::sleep(Duration::from_millis(250)).await;
         }
+        // Apply pending migrations under the lock, so two processes never migrate at once.
         migrate::run(&mut client).await?;
         // A new database gets a new random generation; an existing one keeps its own.
         client
@@ -133,8 +152,11 @@ impl Store {
                 &[&SCHEMA_WRITER_KEY],
             )
             .await?;
+        // Read back whichever generation is stored (ours if we just created it).
         let generation: String = client.query_one("SELECT value FROM meta WHERE key = 'generation'", &[]).await?.get(0);
+        // Prepare every statement once on this connection; ingesting an event then reuses the plans.
         let stmts = Statements {
+            // Idempotent insert: replaying a page after a crash adds no duplicate (the unique key is the digest and event index).
             insert_event: client
                 .prepare(
                     "INSERT INTO events
@@ -143,6 +165,7 @@ impl Store {
                      ON CONFLICT (tx_digest, event_index) DO NOTHING",
                 )
                 .await?,
+            // Counters are maintained as events arrive, so coverage never needs a scan; the checkpoint range only widens.
             bump_stream: client
                 .prepare(
                     "INSERT INTO stream_stats (stream, from_checkpoint, latest_checkpoint, events) VALUES ($1, $2, $2, 1)
@@ -152,30 +175,36 @@ impl Store {
                        events = stream_stats.events + 1",
                 )
                 .await?,
+            // The per-gate count of each event kind.
             bump_gate: client
                 .prepare(
                     "INSERT INTO gate_stats (gate_id, kind, n) VALUES ($1, $2, 1)
                      ON CONFLICT (gate_id, kind) DO UPDATE SET n = gate_stats.n + 1",
                 )
                 .await?,
+            // The running commission total per gate, in `numeric` so a sum of u64 values cannot overflow.
             bump_commission: client
                 .prepare(
                     "INSERT INTO gate_commission (gate_id, total) VALUES ($1, $2::bigint::numeric)
                      ON CONFLICT (gate_id) DO UPDATE SET total = gate_commission.total + EXCLUDED.total",
                 )
                 .await?,
+            // The stream's position: where the next poll starts.
             upsert_cursor: client
                 .prepare(
                     "INSERT INTO cursors (stream, cursor) VALUES ($1, $2)
                      ON CONFLICT (stream) DO UPDATE SET cursor = EXCLUDED.cursor",
                 )
                 .await?,
+            // Poll state and liveness are stored as heartbeats the API and the health check read.
             upsert_heartbeat: client
                 .prepare("INSERT INTO heartbeats (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value")
                 .await?,
+            // Values such as the bound packages and the generation.
             upsert_meta: client
                 .prepare("INSERT INTO meta (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value")
                 .await?,
+            // An event that could not be decoded is counted, not dropped silently.
             note_undecodable: client
                 .prepare(
                     "INSERT INTO stream_stats (stream, undecodable) VALUES ($1, $2)
@@ -224,12 +253,14 @@ impl Store {
         }
     }
 
+    /// Compare the stored packages with the configured ones and bind them; a changed package is refused unless the stream is confirmed for re-indexing, in which case its history is deleted (after the optional backup) and the generation changes.
     async fn bind_packages_inner(
         &mut self,
         packages: &[(Stream, String)],
         confirm: &[Stream],
         backup: Option<&str>,
     ) -> Result<std::result::Result<Vec<Stream>, PackageChangedError>> {
+        // The streams whose recorded package differs from the configured one (or that hold rows from before packages were recorded).
         let mut pending = Vec::new();
         for (stream, pkg) in packages {
             let recorded = self.meta(&format!("package:{stream}")).await?;
@@ -245,6 +276,7 @@ impl Store {
                 pending.push(*stream);
             }
         }
+        // Only streams the operator listed may be cleared.
         let confirmed: Vec<Stream> = pending.iter().copied().filter(|s| confirm.contains(s)).collect();
         if pending.len() != confirmed.len() {
             let refused = pending.into_iter().filter(|s| !confirmed.contains(s)).collect();
@@ -402,27 +434,35 @@ impl Store {
 
     // Read paths shared with the API (the writer's tests use them too).
 
+    /// One page of a stream (see the shared read path).
     pub async fn page(&self, stream: Stream, q: &PageQuery) -> Result<Page> {
         read::page(&self.client, stream, q).await
     }
+    /// The newest row id of a stream (0 when empty).
     pub async fn head_id(&self, stream: Stream) -> Result<i64> {
         read::head_id(&self.client, stream).await
     }
+    /// A stream's coverage counters.
     pub async fn coverage(&self, stream: Stream) -> Result<Coverage> {
         read::coverage(&self.client, stream).await
     }
+    /// A stream's undecodable and gap counters.
     pub async fn health(&self, stream: Stream) -> Result<StreamHealth> {
         read::health(&self.client, stream).await
     }
+    /// One gate's counts and commission.
     pub async fn gate_stats(&self, gate_id: &str) -> Result<GateStats> {
         read::gate_stats(&self.client, gate_id).await
     }
+    /// A stream's persisted poll state.
     pub async fn poll_state(&self, stream: Stream) -> Result<PollState> {
         read::poll_state(&self.client, stream).await
     }
+    /// A value from the `meta` table.
     pub async fn meta(&self, key: &str) -> Result<Option<String>> {
         read::meta(&self.client, key).await
     }
+    /// A value from the `heartbeats` table.
     pub async fn heartbeat(&self, key: &str) -> Result<Option<String>> {
         read::heartbeat(&self.client, key).await
     }

@@ -25,6 +25,7 @@ use tokio_postgres_rustls::MakeRustlsConnect;
 use crate::config::ConfigError;
 use crate::error::{Result, StoreError};
 
+/// An example URL for error messages, with placeholders only (never a real value).
 const URL_HELP: &str = "postgres://user:password@host:5432/database?sslmode=verify-full&sslrootcert=/path/ca.crt";
 
 /// How long a new connection may take to be established (TCP, TLS and authentication).
@@ -33,16 +34,19 @@ pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 /// Everything needed to open connections: parsed and validated once, at startup.
 #[derive(Clone)]
 pub struct DatabaseSettings {
+    /// The parsed connection settings.
     pg: tokio_postgres::Config,
     /// The CA certificate (PEM) the server certificate is verified against; `None` only for
     /// `sslmode=disable`.
     ca_path: Option<String>,
+    /// Whether `sslmode=disable` and an empty password were allowed (local tests only).
     insecure: bool,
     /// The URL as given. A secret: only used to compare settings and to derive others.
     url: String,
 }
 
 impl PartialEq for DatabaseSettings {
+    /// Settings are equal when their URL and insecure flag are (the parsed form is derived from the URL).
     fn eq(&self, other: &Self) -> bool {
         self.url == other.url && self.insecure == other.insecure
     }
@@ -51,6 +55,7 @@ impl PartialEq for DatabaseSettings {
 impl Eq for DatabaseSettings {}
 
 impl fmt::Debug for DatabaseSettings {
+    /// Show the host, port, database and user only: never the password or the URL.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("DatabaseSettings")
             .field("host", &self.host())
@@ -62,6 +67,7 @@ impl fmt::Debug for DatabaseSettings {
     }
 }
 
+/// A configuration error for `DATABASE_URL`: it says what is wrong and shows the expected shape, never the value.
 fn bad(what: &str) -> ConfigError {
     ConfigError(format!("DATABASE_URL {what} (expected {URL_HELP})"))
 }
@@ -71,36 +77,46 @@ impl DatabaseSettings {
     /// `sslmode=disable` and an empty password, for local tests only.
     pub fn parse(url: &str, allow_insecure: bool) -> std::result::Result<DatabaseSettings, ConfigError> {
         let rest = url
+            // Only the two PostgreSQL URL schemes are accepted; the error says what to write, not what was written.
             .strip_prefix("postgres://")
             .or_else(|| url.strip_prefix("postgresql://"))
             .ok_or_else(|| bad("must start with postgres://"))?;
         // Split the query string; take sslmode and sslrootcert out of it (tokio-postgres knows neither
         // `verify-full` nor `sslrootcert`) and hand the rest to its own parser.
+        // Split off the query string, where the TLS settings live.
         let (base, query) = match rest.split_once('?') {
             Some((b, q)) => (b, q),
             None => (rest, ""),
         };
+        // Kept apart: tokio-postgres has no `verify-full` mode and no `sslrootcert`, so this crate verifies the server itself.
         let (mut sslmode, mut sslrootcert) = (None, None);
+        // The parameters tokio-postgres is allowed to see.
         let mut kept: Vec<&str> = Vec::new();
+        // Walk the parameters, ignoring empty pieces.
         for pair in query.split('&').filter(|p| !p.is_empty()) {
             let (k, v) = pair.split_once('=').unwrap_or((pair, ""));
             match k {
+                // Remember the TLS mode and CA path, decoded.
                 "sslmode" => sslmode = Some(percent_decode_str(v).decode_utf8_lossy().into_owned()),
                 "sslrootcert" => sslrootcert = Some(percent_decode_str(v).decode_utf8_lossy().into_owned()),
                 // Settings that would weaken or redirect the connection are not accepted from the URL.
+                // A URL may not choose a client certificate, extra options, another host or a channel-binding or session-attribute policy: those would weaken or redirect the connection.
                 "sslcert" | "sslkey" | "options" | "host" | "hostaddr" | "channel_binding" | "target_session_attrs" => {
                     return Err(bad(&format!("must not set {k}")));
                 }
                 _ => kept.push(pair),
             }
         }
+        // Rebuild a URL without the settings handled here, for tokio-postgres's own parser.
         let mut cleaned = format!("postgres://{base}");
         if !kept.is_empty() {
             cleaned.push('?');
             cleaned.push_str(&kept.join("&"));
         }
+        // A parse failure is reported without the URL (it holds the password).
         let mut pg = tokio_postgres::Config::from_str(&cleaned).map_err(|_| bad("is not a valid connection URL"))?;
 
+        // Exactly one TCP host and at most one port: no failover list and no Unix socket.
         let hosts = pg.get_hosts();
         if hosts.len() != 1 || !matches!(hosts[0], Host::Tcp(ref h) if !h.is_empty()) {
             return Err(bad("must name exactly one TCP host"));
@@ -108,6 +124,7 @@ impl DatabaseSettings {
         if pg.get_ports().len() > 1 {
             return Err(bad("must name exactly one port"));
         }
+        // A user and a database are required, and so is a password unless insecure mode was asked for.
         if pg.get_user().is_none_or(str::is_empty) {
             return Err(bad("must name a user"));
         }
@@ -117,12 +134,14 @@ impl DatabaseSettings {
         if pg.get_password().is_none_or(<[u8]>::is_empty) && !allow_insecure {
             return Err(bad("must carry a password"));
         }
+        // Only `verify-full` is accepted, with a CA file; the weaker modes do not authenticate the server.
         let ca_path = match sslmode.as_deref() {
             Some("verify-full") => {
                 let ca =
                     sslrootcert.filter(|c| !c.is_empty()).ok_or_else(|| bad("needs sslrootcert with verify-full"))?;
                 Some(ca)
             }
+            // Plain-text connections exist for local tests only, and only when explicitly allowed.
             Some("disable") if allow_insecure => None,
             None if allow_insecure => None,
             Some("disable") | None => {
@@ -132,20 +151,26 @@ impl DatabaseSettings {
                 return Err(bad("must set sslmode=verify-full (the other modes do not authenticate the server)"));
             }
         };
+        // Ask tokio-postgres for TLS (the certificate is verified by this crate against the CA) or for none.
         pg.ssl_mode(if ca_path.is_some() {
             tokio_postgres::config::SslMode::Require
         } else {
             tokio_postgres::config::SslMode::Disable
         });
+        // A dead or filtered server fails the connect instead of hanging the process.
         pg.connect_timeout(CONNECT_TIMEOUT);
+        // TCP keepalives notice a connection a middlebox dropped silently.
         pg.keepalives(true).keepalives_idle(Duration::from_secs(30));
         Ok(DatabaseSettings { pg, ca_path, insecure: allow_insecure, url: url.to_owned() })
     }
 
     /// The same server and TLS settings with other credentials and database (tests and tooling).
     pub fn with_credentials(&self, user: &str, password: &str, dbname: &str) -> DatabaseSettings {
+        // Percent-encode everything but letters and digits, so a password with `@` or `/` cannot change the URL's structure.
         let enc = |s: &str| utf8_percent_encode(s, NON_ALPHANUMERIC).to_string();
+        // The URL is rebuilt from parts rather than patched, so no old credential can survive in it.
         let mut url = format!("postgres://{}:{}@", enc(user), enc(password));
+        // An IPv6 host must be bracketed in a URL.
         let host = self.host();
         if host.contains(':') {
             url.push_str(&format!("[{host}]"));
@@ -153,20 +178,25 @@ impl DatabaseSettings {
             url.push_str(host);
         }
         url.push_str(&format!(":{}/{}", self.port(), enc(dbname)));
+        /// The characters percent-encoded when a credential is placed in a URL (everything that is not alphanumeric).
         const KEEP: &AsciiSet = NON_ALPHANUMERIC;
         match &self.ca_path {
+            // Keep the TLS setting of the original: same CA, same verification.
             Some(ca) => url.push_str(&format!("?sslmode=verify-full&sslrootcert={}", utf8_percent_encode(ca, KEEP))),
             None => url.push_str("?sslmode=disable"),
         }
+        // The derived URL is built from validated parts, so it parses; a failure here is a bug.
         DatabaseSettings::parse(&url, self.insecure).expect("derived settings are valid")
     }
 
     /// The same settings, labelled in `pg_stat_activity`.
     pub fn with_application_name(mut self, name: &str) -> DatabaseSettings {
+        // The name shows in `pg_stat_activity`, so an operator can tell the writer from the API connections.
         self.pg.application_name(name);
         self
     }
 
+    /// The server host of the first address in the URL.
     pub fn host(&self) -> &str {
         match &self.pg.get_hosts()[0] {
             Host::Tcp(h) => h,
@@ -175,14 +205,17 @@ impl DatabaseSettings {
         }
     }
 
+    /// The server port, 5432 when the URL names none.
     pub fn port(&self) -> u16 {
         self.pg.get_ports().first().copied().unwrap_or(5432)
     }
 
+    /// The database name.
     pub fn dbname(&self) -> &str {
         self.pg.get_dbname().unwrap_or_default()
     }
 
+    /// The user name.
     pub fn user(&self) -> &str {
         self.pg.get_user().unwrap_or_default()
     }
@@ -256,16 +289,20 @@ impl DatabaseSettings {
     }
 }
 
+/// Unit tests for URL parsing and the settings.
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// A well-formed (throwaway) URL.
     const GOOD: &str = "postgres://sui_indexer_api:s3cr3t-Passw0rd@postgres.database.svc.cluster.local:5432/sui_indexer?sslmode=verify-full&sslrootcert=/etc/postgres-ca/ca.crt";
 
+    /// The error message for a URL that must be rejected.
     fn err(url: &str, insecure: bool) -> String {
         DatabaseSettings::parse(url, insecure).unwrap_err().0
     }
 
+    /// Parses the tier url.
     #[test]
     fn parses_the_tier_url() {
         let s = DatabaseSettings::parse(GOOD, false).unwrap();
@@ -286,6 +323,7 @@ mod tests {
         assert_eq!(s2.port(), 5432);
     }
 
+    /// Requires verify full and a root certificate.
     #[test]
     fn requires_verify_full_and_a_root_certificate() {
         for url in [
@@ -302,6 +340,7 @@ mod tests {
         assert!(err("postgres://u:pw@h/db?sslmode=verify-full&sslrootcert=", false).contains("sslrootcert"));
     }
 
+    /// Insecure mode admits only a plaintext local setup.
     #[test]
     fn insecure_mode_admits_only_a_plaintext_local_setup() {
         let s = DatabaseSettings::parse("postgres://u:pw@127.0.0.1:5433/db?sslmode=disable", true).unwrap();
@@ -316,6 +355,7 @@ mod tests {
         );
     }
 
+    /// Refuses an empty password unless insecure.
     #[test]
     fn refuses_an_empty_password_unless_insecure() {
         let url = "postgres://u@h/db?sslmode=verify-full&sslrootcert=/ca.crt";
@@ -324,6 +364,7 @@ mod tests {
         assert!(DatabaseSettings::parse(url, true).is_ok());
     }
 
+    /// Refuses what is not a single tcp server with a user and a database.
     #[test]
     fn refuses_what_is_not_a_single_tcp_server_with_a_user_and_a_database() {
         for (url, needle) in [
@@ -341,6 +382,7 @@ mod tests {
         }
     }
 
+    /// Nothing prints the password.
     #[test]
     fn nothing_prints_the_password() {
         let pw = "s3cr3t-Passw0rd";
@@ -358,6 +400,7 @@ mod tests {
         }
     }
 
+    /// Derived settings keep the server and tls and encode credentials.
     #[test]
     fn derived_settings_keep_the_server_and_tls_and_encode_credentials() {
         let s = DatabaseSettings::parse(GOOD, false).unwrap();

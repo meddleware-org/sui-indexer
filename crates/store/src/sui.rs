@@ -20,8 +20,11 @@ pub fn is_hex_id(raw: &str) -> bool {
 /// A non-generic Move struct type `address::module::Name`, with the address normalised.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StructTag {
+    /// The package address, normalised to the long `0x` form.
     pub address: String,
+    /// The module name.
     pub module: String,
+    /// The struct name.
     pub name: String,
 }
 
@@ -39,6 +42,7 @@ impl StructTag {
 }
 
 impl std::fmt::Display for StructTag {
+    /// Write the tag as `address::module::Name`.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}::{}::{}", self.address, self.module, self.name)
     }
@@ -51,10 +55,12 @@ fn is_ident(s: &str) -> bool {
         && b.all(|c| c.is_ascii_alphanumeric() || c == b'_')
 }
 
+/// Unit tests for address normalisation and tag parsing.
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// Normalises like the ts sdk.
     #[test]
     fn normalises_like_the_ts_sdk() {
         assert_eq!(normalize_sui_address("0xABC"), format!("0x{}abc", "0".repeat(61)));
@@ -62,6 +68,7 @@ mod tests {
         assert_eq!(normalize_sui_address(&format!("0x{}", "D".repeat(64))), format!("0x{}", "d".repeat(64)));
     }
 
+    /// Hex ids.
     #[test]
     fn hex_ids() {
         assert!(is_hex_id("0xA"));
@@ -71,10 +78,12 @@ mod tests {
         }
     }
 
+    /// Struct tags.
     #[test]
     fn struct_tags() {
         let t = StructTag::parse("0xa1::access_gate::AccessMintedEvent").unwrap();
         assert_eq!(t.to_string(), format!("0x{}a1::access_gate::AccessMintedEvent", "0".repeat(62)));
+        // Generic types and paths with other than three parts are not event types here.
         assert!(StructTag::parse("0xa1::access_gate::Foo<u64>").is_none());
         assert!(StructTag::parse("0xa1::access_gate").is_none());
         assert!(StructTag::parse("0xa1::a::b::c").is_none());
