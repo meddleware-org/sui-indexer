@@ -13,8 +13,8 @@
   },
   "devDependencies": {
     "@meddleware/access-gate-client": "0.0.13",
-    "@meddleware/sealed-storage-client": "0.0.26",
-    "@mysten/sui": "2.38.0",
+    "@meddleware/sealed-storage-client": "0.0.27",
+    "@mysten/sui": "2.39.1",
     "vitest": "5.1.0"
   }
 }
