@@ -22,11 +22,11 @@ path = "src/main.rs"
 # The store crate: configuration, the read queries and the pool.
 sui-indexer-store = { path = "../store" }
 # HTTP/1.1 server without a web framework: hyper + hyper-util (timeouts, graceful shutdown).
-hyper = { version = "=1.12.0", features = ["http1", "server"] }
+hyper = { version = "=1.13.0", features = ["http1", "server"] }
 hyper-util = { version = "=0.1.21", features = ["tokio", "server", "server-graceful", "http1"] }
 # Body types, byte buffers and the runtime: the minimum the server needs.
 http-body-util = "=0.1.5"
-bytes = "=1.12.1"
+bytes = "=1.12.2"
 tokio = { version = "=1.54.1", features = ["rt-multi-thread", "macros", "net", "time", "signal", "sync"] }
 # JSON for the response bodies and base64 for the BCS bytes in them.
 serde = { version = "=1.0.229", features = ["derive"] }
@@ -40,5 +40,5 @@ tokio = { version = "=1.54.1", features = ["rt-multi-thread", "macros", "net", "
 # The fixtures the handler tests seed the database with.
 sui-indexer-testkit = { path = "../testkit" }
 proptest = { version = "=1.12.0", default-features = false, features = ["std"] }
-hyper = { version = "=1.12.0", features = ["http1", "server", "client"] }
+hyper = { version = "=1.13.0", features = ["http1", "server", "client"] }
 hyper-util = { version = "=0.1.21", features = ["tokio", "server", "server-graceful", "http1", "client-legacy"] }
