@@ -5,7 +5,7 @@ members = ["crates/store", "crates/ingest", "crates/api", "crates/testkit"]
 
 # Fields every crate inherits, so one edit bumps the version of all.
 [workspace.package]
-version = "0.0.21"
+version = "0.0.22"
 edition = "2024"
 # The dependency graph's floor (checked in CI by the `msrv` job).
 rust-version = "1.88"

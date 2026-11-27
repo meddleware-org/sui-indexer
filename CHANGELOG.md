@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.22] - 2026-11-27
+
 ### Fixed
 
 - The start-up messages that named the full node (`GRPC_URL`) repeated the whole URL, so a URL carrying a user name, password or key
