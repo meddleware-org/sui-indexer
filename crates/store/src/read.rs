@@ -248,10 +248,10 @@ pub struct CoverageSnapshot {
 
 /// Read both streams' counters and the generation in one statement.
 pub(crate) async fn coverage_snapshot(c: &impl Query) -> Result<CoverageSnapshot> {
+    // A single-row anchor with LEFT JOINs, so the answer exists even before any stream has data.
     let rows = c
         .rows(
             "SELECT g.value, s.stream, s.from_checkpoint, s.latest_checkpoint, s.events, s.undecodable, s.gaps
-             // A single-row anchor with LEFT JOINs, so the answer exists even before any stream has data.
              FROM (SELECT 1) AS one LEFT JOIN meta g ON g.key = 'generation' LEFT JOIN stream_stats s ON true",
             &[],
         )
@@ -297,11 +297,11 @@ pub struct GateSnapshot {
 
 /// Read one gate's counters, commission and the start of coverage in one statement.
 pub(crate) async fn gate_snapshot(c: &impl Query, gate_id: &str) -> Result<GateSnapshot> {
+    // Per-kind counts and the commission total are maintained at ingest, so this never scans events.
     let rows = c
         .rows(
             "SELECT s.kind, s.n, c.total::text, (SELECT from_checkpoint FROM stream_stats WHERE stream = 'access-gate')
              FROM (SELECT 1) AS one
-             // Per-kind counts and the commission total are maintained at ingest, so this never scans events.
              LEFT JOIN gate_stats s ON s.gate_id = $1
              LEFT JOIN gate_commission c ON c.gate_id = $1
              ORDER BY s.kind",
