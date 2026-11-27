@@ -199,3 +199,7 @@ and exports `digest`; `mirror-private` promotes that digest. The `<commit>-<arch
 `scripts/check-index.sh` asserts the merged index holds both architectures and their provenance. Running the
 workflow by hand is a dry run (`dry_run` input, default on): nothing is pushed or signed. Do not reintroduce
 `setup-qemu-action` for a Rust compile.
+
+## Documentation rules (workspace documentation standard, D144)
+
+Every file has a `//!` header and every item a `///` doc comment, private items included; line comments say why. `missing_docs` and `clippy::missing_docs_in_private_items` are `deny` in the workspace lints, so clippy fails the build on a gap. `node scripts/check-docs.mjs --report sui-indexer` (in the workspace repository) is the gate. See [CONTRIBUTING.md](CONTRIBUTING.md).
